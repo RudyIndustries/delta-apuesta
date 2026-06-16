@@ -89,6 +89,7 @@ const elements = {
   userSelect: document.querySelector("#userSelect"),
   newUserInput: document.querySelector("#newUserInput"),
   addUserButton: document.querySelector("#addUserButton"),
+  deleteUserButton: document.querySelector("#deleteUserButton"),
   todayLabel: document.querySelector("#todayLabel"),
   activeUserLabel: document.querySelector("#activeUserLabel"),
   sourceLabel: document.querySelector("#sourceLabel"),
@@ -153,6 +154,7 @@ async function init() {
 
 function bindEvents() {
   elements.addUserButton.addEventListener("click", addUser);
+  elements.deleteUserButton.addEventListener("click", deleteActiveUser);
   elements.newUserInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -360,6 +362,20 @@ async function persistUser(name) {
   localStorage.setItem(STORAGE_KEYS.activeUser, name);
 }
 
+async function deleteUser(name) {
+  state.users = state.users.filter((user) => normalize(user) !== normalize(name));
+  if (state.users.length === 0) state.users = [...DEFAULT_USERS];
+  state.activeUser = state.users[0];
+  localStorage.setItem(STORAGE_KEYS.activeUser, state.activeUser);
+
+  if (!state.remoteEnabled) {
+    saveState();
+    return;
+  }
+
+  await deleteDoc(remoteDoc("users", getUserId(name)));
+}
+
 async function persistBet(bet) {
   if (!state.remoteEnabled) {
     saveState();
@@ -407,6 +423,22 @@ async function addUser() {
   state.activeUser = state.users.find((user) => normalize(user) === normalize(name)) || name;
   elements.newUserInput.value = "";
   await persistUser(state.activeUser);
+  renderAll();
+}
+
+async function deleteActiveUser() {
+  const user = state.activeUser;
+  if (!user) return;
+
+  const hasBets = state.bets.some((bet) => bet.user === user);
+  const warning = hasBets
+    ? `El usuario ${user} tiene apuestas registradas. Se borrara de la lista, pero sus apuestas quedaran en el historial.`
+    : `Se borrara el usuario ${user}.`;
+
+  const confirmed = window.confirm(`${warning}\n\nQuieres continuar?`);
+  if (!confirmed) return;
+
+  await deleteUser(user);
   renderAll();
 }
 

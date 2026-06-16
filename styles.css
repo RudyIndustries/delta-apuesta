@@ -175,7 +175,7 @@ h3 {
 
 .login-row {
   display: grid;
-  grid-template-columns: minmax(140px, 0.8fr) minmax(150px, 1fr) auto;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(150px, 1fr) auto auto;
   gap: 10px;
 }
 
@@ -410,6 +410,13 @@ legend {
   color: #07140d;
   background: linear-gradient(135deg, var(--accent), var(--gold));
   border: 0;
+  font-weight: 900;
+}
+
+.danger-button {
+  color: #2a0606;
+  background: var(--danger);
+  border-color: var(--danger);
   font-weight: 900;
 }
 

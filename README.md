@@ -6,6 +6,7 @@ Sistema web estatico para registrar apuestas amistosas del Mundial 2026.
 
 - Usuarios por defecto: Rene, Cesar y Rolando.
 - Agregar nuevos usuarios escribiendo su nombre.
+- Borrar el usuario activo desde el panel superior.
 - Consultar partidos del dia con hora de Bolivia.
 - Fuente principal: TheSportsDB API gratuita.
 - Respaldo local para los partidos del Mundial 2026 del 16 de junio.
