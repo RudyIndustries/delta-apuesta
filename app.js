@@ -1,5 +1,19 @@
+import { firebaseConfig } from "./firebase-config.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  getFirestore,
+  onSnapshot,
+  setDoc,
+  writeBatch,
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
 const BOLIVIA_TIME_ZONE = "America/La_Paz";
 const ADMIN_PASSWORD = "admin123";
+const FIREBASE_ROOM_ID = "delta-apuesta-main";
 const DEFAULT_USERS = ["Rene", "Cesar", "Rolando"];
 const QUICK_AMOUNTS = [5, 10, 15, 20, 30, 50, 100];
 const STORAGE_KEYS = {
@@ -64,6 +78,10 @@ const state = {
   modalMatchId: "",
   dismissedSettlementPrompts: new Set(),
   liveBettingEnabled: false,
+  db: null,
+  remoteEnabled: false,
+  remoteReady: false,
+  unsubscribeRemote: [],
   todayIso: getBoliviaDateIso(new Date()),
 };
 
@@ -118,6 +136,7 @@ init();
 
 async function init() {
   loadState();
+  await initRemoteStore();
   bindEvents();
   renderUsers();
   renderShell();
@@ -171,11 +190,18 @@ function bindEvents() {
     renderAmounts();
   });
 
-  elements.clearMyBetsButton.addEventListener("click", () => {
+  elements.clearMyBetsButton.addEventListener("click", async () => {
+    const removableBetIds = state.bets
+      .filter((bet) => bet.user === state.activeUser && !getSettlement(bet.matchId))
+      .map((bet) => bet.id);
     state.bets = state.bets.filter(
       (bet) => bet.user !== state.activeUser || getSettlement(bet.matchId),
     );
-    saveState();
+    if (state.remoteEnabled) {
+      await Promise.all(removableBetIds.map((id) => deleteDoc(remoteDoc("bets", id))));
+    } else {
+      saveState();
+    }
     renderAll();
   });
 
@@ -229,7 +255,149 @@ function readJson(key, fallback) {
   }
 }
 
-function addUser() {
+async function initRemoteStore() {
+  if (!isFirebaseConfigured()) return;
+
+  try {
+    const app = initializeApp(firebaseConfig);
+    state.db = getFirestore(app);
+    state.remoteEnabled = true;
+    await seedRemoteUsers();
+    await seedRemoteItems("bets", state.bets, (item) => item.id);
+    await seedRemoteItems("settlements", state.settlements, (item) => item.matchId);
+    subscribeToRemoteCollection("users", applyRemoteUsers);
+    subscribeToRemoteCollection("bets", applyRemoteBets);
+    subscribeToRemoteCollection("settlements", applyRemoteSettlements);
+  } catch (error) {
+    console.warn("Firebase no esta disponible. Usando localStorage.", error);
+    state.remoteEnabled = false;
+  }
+}
+
+function isFirebaseConfigured() {
+  return Boolean(firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.appId);
+}
+
+function remoteCollection(name) {
+  return collection(state.db, "rooms", FIREBASE_ROOM_ID, name);
+}
+
+function remoteDoc(name, id) {
+  return doc(state.db, "rooms", FIREBASE_ROOM_ID, name, id);
+}
+
+async function seedRemoteUsers() {
+  const snapshot = await getDocs(remoteCollection("users"));
+  if (!snapshot.empty) return;
+
+  const batch = writeBatch(state.db);
+  const users = [...new Set([...DEFAULT_USERS, ...state.users])].filter(Boolean);
+  users.forEach((name) => {
+    batch.set(remoteDoc("users", getUserId(name)), {
+      name,
+      createdAt: new Date().toISOString(),
+    });
+  });
+  await batch.commit();
+}
+
+async function seedRemoteItems(collectionName, items, getId) {
+  if (!items.length) return;
+
+  const snapshot = await getDocs(remoteCollection(collectionName));
+  if (!snapshot.empty) return;
+
+  const batch = writeBatch(state.db);
+  items.forEach((item) => {
+    const id = getId(item);
+    if (id) batch.set(remoteDoc(collectionName, id), item);
+  });
+  await batch.commit();
+}
+
+function subscribeToRemoteCollection(name, onData) {
+  const unsubscribe = onSnapshot(remoteCollection(name), (snapshot) => {
+    onData(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+    state.remoteReady = true;
+    renderAll();
+    processFinishedMatches(false);
+  });
+  state.unsubscribeRemote.push(unsubscribe);
+}
+
+function applyRemoteUsers(items) {
+  const users = items
+    .map((item) => item.name)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "es"));
+  state.users = users.length > 0 ? users : DEFAULT_USERS;
+  if (!state.users.includes(state.activeUser)) state.activeUser = state.users[0];
+  localStorage.setItem(STORAGE_KEYS.activeUser, state.activeUser);
+}
+
+function applyRemoteBets(items) {
+  state.bets = items
+    .filter((item) => item.id && item.user && item.matchId)
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+}
+
+function applyRemoteSettlements(items) {
+  state.settlements = items
+    .filter((item) => item.matchId)
+    .sort((a, b) => new Date(b.settledAt || 0) - new Date(a.settledAt || 0));
+}
+
+async function persistUser(name) {
+  if (!state.remoteEnabled) {
+    saveState();
+    return;
+  }
+
+  await setDoc(remoteDoc("users", getUserId(name)), {
+    name,
+    createdAt: new Date().toISOString(),
+  });
+  localStorage.setItem(STORAGE_KEYS.activeUser, name);
+}
+
+async function persistBet(bet) {
+  if (!state.remoteEnabled) {
+    saveState();
+    return;
+  }
+
+  await setDoc(remoteDoc("bets", bet.id), bet);
+}
+
+async function deleteBet(id) {
+  if (!state.remoteEnabled) {
+    state.bets = state.bets.filter((bet) => bet.id !== id);
+    saveState();
+    renderAll();
+    return;
+  }
+
+  await deleteDoc(remoteDoc("bets", id));
+}
+
+async function persistSettlement(settlement) {
+  const existingIndex = state.settlements.findIndex((item) => item.matchId === settlement.matchId);
+  if (existingIndex >= 0) state.settlements.splice(existingIndex, 1, settlement);
+  else state.settlements.unshift(settlement);
+
+  if (!state.remoteEnabled) {
+    saveState();
+    return;
+  }
+
+  await setDoc(remoteDoc("settlements", settlement.matchId), settlement);
+}
+
+function getUserId(name) {
+  return slugify(name) || crypto.randomUUID();
+}
+
+async function addUser() {
   const name = toTitleName(elements.newUserInput.value);
   if (!name) return;
 
@@ -238,7 +406,7 @@ function addUser() {
 
   state.activeUser = state.users.find((user) => normalize(user) === normalize(name)) || name;
   elements.newUserInput.value = "";
-  saveState();
+  await persistUser(state.activeUser);
   renderAll();
 }
 
@@ -275,11 +443,17 @@ async function loadMatches() {
     const merged = mergeMatches(apiMatches, fallback);
     state.matches = sortMatches(merged);
     elements.sourceLabel.textContent =
-      apiMatches.length > 0 ? "TheSportsDB + respaldo" : "Respaldo local";
+      apiMatches.length > 0
+        ? `TheSportsDB + ${getStorageLabel()}`
+        : `Respaldo local + ${getStorageLabel()}`;
   } catch (error) {
     state.matches = sortMatches(fallback);
-    elements.sourceLabel.textContent = "Respaldo local";
+    elements.sourceLabel.textContent = `Respaldo local + ${getStorageLabel()}`;
   }
+}
+
+function getStorageLabel() {
+  return state.remoteEnabled ? "Firebase" : "localStorage";
 }
 
 async function fetchSportsDbMatchesForBoliviaDate(dateIso) {
@@ -592,7 +766,7 @@ function renderAmounts() {
   }
 }
 
-function placeBet() {
+async function placeBet() {
   const match = state.matches.find((item) => item.id === state.selectedMatchId);
   const amount = Math.round(Number(state.selectedAmount));
 
@@ -629,7 +803,7 @@ function placeBet() {
   if (existingIndex >= 0) state.bets.splice(existingIndex, 1, bet);
   else state.bets.unshift(bet);
 
-  saveState();
+  await persistBet(bet);
   showFormMessage(existingIndex >= 0 ? "Apuesta actualizada." : "Apuesta registrada.");
   renderAll();
   setTimeout(closeBetModal, 350);
@@ -655,10 +829,8 @@ function renderBets() {
 
   elements.betsList.innerHTML = state.bets.map(renderBetItem).join("");
   elements.betsList.querySelectorAll("[data-remove-bet]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.bets = state.bets.filter((bet) => bet.id !== button.dataset.removeBet);
-      saveState();
-      renderAll();
+    button.addEventListener("click", async () => {
+      await deleteBet(button.dataset.removeBet);
     });
   });
 }
@@ -717,26 +889,26 @@ function getMatchLifecycle(match) {
   return { available: true, live: false, finished: false, label: "Disponible" };
 }
 
-function processFinishedMatches(shouldOpenModal = false) {
+async function processFinishedMatches(shouldOpenModal = false) {
   let changed = false;
   let matchToOpen = "";
 
-  state.matches.forEach((match) => {
+  for (const match of state.matches) {
     const lifecycle = getMatchLifecycle(match);
     const bets = getBetsForMatch(match.id);
-    if (!lifecycle.finished || bets.length === 0 || getSettlement(match.id)) return;
+    if (!lifecycle.finished || bets.length === 0 || getSettlement(match.id)) continue;
 
     const resultChoice = getResultChoice(match);
     if (resultChoice) {
       const settlement = createSettlement(match, resultChoice, "automatico");
-      state.settlements.unshift(settlement);
+      await persistSettlement(settlement);
       changed = true;
       if (!matchToOpen) matchToOpen = match.id;
-      return;
+      continue;
     }
 
     if (!matchToOpen && !state.dismissedSettlementPrompts.has(match.id)) matchToOpen = match.id;
-  });
+  }
 
   if (changed) {
     saveState();
@@ -816,11 +988,10 @@ function renderSettlementModal(match) {
   });
 }
 
-function settleMatchManually(match, resultChoice) {
+async function settleMatchManually(match, resultChoice) {
   if (getSettlement(match.id)) return;
   const settlement = createSettlement(match, resultChoice, "manual");
-  state.settlements.unshift(settlement);
-  saveState();
+  await persistSettlement(settlement);
   renderMatches();
   renderBets();
   renderSettlementModal(match);

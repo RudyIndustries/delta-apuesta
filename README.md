@@ -24,7 +24,8 @@ Sistema web estatico para registrar apuestas amistosas del Mundial 2026.
 - Reparto del pozo acumulado entre quienes acertaron.
 - Si el partido termina empatado, nadie cobra y el pozo se acumula para el siguiente partido.
 - Historial final de ganadores, perdedores y pagos.
-- Persistencia en `localStorage`.
+- Persistencia local con `localStorage` si Firebase no esta configurado.
+- Persistencia compartida con Firebase Firestore cuando se completa `firebase-config.js`.
 
 ## Liquidacion de apuestas
 
@@ -115,7 +116,64 @@ En Windows tambien puedes abrir `iniciar.bat`.
 3. Deja el framework como `Other` o `Static`.
 4. No se necesita comando de build.
 
-La app no usa base de datos. Las apuestas quedan guardadas en el navegador de cada dispositivo.
+## Base de datos compartida con Firebase
+
+La app ya esta preparada para Firebase Firestore. Si `firebase-config.js` esta vacio, usa
+`localStorage` y los datos solo se ven en cada navegador. Si completas `firebase-config.js`, todos
+los usuarios, apuestas, liquidaciones, pozo e historial se comparten entre dispositivos.
+
+Pasos:
+
+1. Entra a [Firebase Console](https://console.firebase.google.com/).
+2. Crea un proyecto.
+3. Agrega una app web con el icono `</>`.
+4. Copia la configuracion que Firebase te da.
+5. Pegala en `firebase-config.js`.
+
+Debe quedar parecido a esto:
+
+```js
+export const firebaseConfig = {
+  apiKey: "TU_API_KEY",
+  authDomain: "tu-proyecto.firebaseapp.com",
+  projectId: "tu-proyecto",
+  storageBucket: "tu-proyecto.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:123456789:web:abcdef",
+};
+```
+
+Luego activa Firestore:
+
+1. En Firebase, entra a `Firestore Database`.
+2. Crea la base de datos.
+3. Usa una region cercana.
+4. En `Rules`, para una version simple de grupo cerrado, puedes usar:
+
+```js
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /rooms/delta-apuesta-main/{collection}/{docId} {
+      allow read, write: if true;
+    }
+  }
+}
+```
+
+Estas reglas permiten que cualquiera con el enlace pueda leer y escribir datos. Sirven para una
+apuesta familiar o de amigos, pero si el sitio sera publico conviene agregar autenticacion.
+
+Despues de editar `firebase-config.js`, sube los cambios:
+
+```powershell
+git add .
+git commit -m "Conectar Firebase"
+git push
+```
+
+Vercel redeployara automaticamente.
 
 ## API
 
