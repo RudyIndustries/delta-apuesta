@@ -16,13 +16,6 @@ const ADMIN_PASSWORD = "admin123";
 const FIREBASE_ROOM_ID = "delta-apuesta-main";
 const DEFAULT_USERS = ["Rene", "Cesar", "Rolando"];
 const QUICK_AMOUNTS = [5, 10, 15, 20, 30, 50, 100];
-const STORAGE_KEYS = {
-  users: "delta-apuesta-users",
-  activeUser: "delta-apuesta-active-user",
-  bets: "delta-apuesta-bets",
-  settlements: "delta-apuesta-settlements",
-  manualScores: "delta-apuesta-manual-scores",
-};
 
 const state = {
   users: [],
@@ -97,7 +90,6 @@ const elements = {
 init();
 
 async function init() {
-  loadState();
   await initRemoteStore();
   bindEvents();
   renderUsers();
@@ -125,7 +117,6 @@ function bindEvents() {
 
   elements.userSelect.addEventListener("change", () => {
     state.activeUser = elements.userSelect.value;
-    saveState();
     state.selectedMatchId = "";
     renderAll();
   });
@@ -154,18 +145,22 @@ function bindEvents() {
   });
 
   elements.clearMyBetsButton.addEventListener("click", async () => {
+    if (!state.remoteEnabled) {
+      window.alert("Firebase no esta conectado. No se pueden borrar apuestas.");
+      return;
+    }
     const removableBetIds = state.bets
       .filter((bet) => bet.user === state.activeUser && !getSettlement(bet.matchId))
       .map((bet) => bet.id);
-    state.bets = state.bets.filter(
-      (bet) => bet.user !== state.activeUser || getSettlement(bet.matchId),
-    );
-    if (state.remoteEnabled) {
+    try {
       await Promise.all(removableBetIds.map((id) => deleteDoc(remoteDoc("bets", id))));
-    } else {
-      saveState();
+      state.bets = state.bets.filter(
+        (bet) => bet.user !== state.activeUser || getSettlement(bet.matchId),
+      );
+      renderAll();
+    } catch (error) {
+      window.alert("No se pudieron borrar las apuestas en Firebase.");
     }
-    renderAll();
   });
 
   elements.openResultsButton.addEventListener("click", openResultsModal);
@@ -194,32 +189,6 @@ function bindEvents() {
   });
 }
 
-function loadState() {
-  state.users = readJson(STORAGE_KEYS.users, DEFAULT_USERS);
-  state.bets = readJson(STORAGE_KEYS.bets, []);
-  state.settlements = readJson(STORAGE_KEYS.settlements, []);
-  state.manualScores = readJson(STORAGE_KEYS.manualScores, []);
-  const storedActiveUser = localStorage.getItem(STORAGE_KEYS.activeUser);
-  state.activeUser = state.users.includes(storedActiveUser) ? storedActiveUser : state.users[0];
-}
-
-function saveState() {
-  localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(state.users));
-  localStorage.setItem(STORAGE_KEYS.bets, JSON.stringify(state.bets));
-  localStorage.setItem(STORAGE_KEYS.settlements, JSON.stringify(state.settlements));
-  localStorage.setItem(STORAGE_KEYS.manualScores, JSON.stringify(state.manualScores));
-  localStorage.setItem(STORAGE_KEYS.activeUser, state.activeUser);
-}
-
-function readJson(key, fallback) {
-  try {
-    const value = JSON.parse(localStorage.getItem(key));
-    return Array.isArray(value) ? value : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 async function initRemoteStore() {
   if (!isFirebaseConfigured()) return;
 
@@ -228,16 +197,14 @@ async function initRemoteStore() {
     state.db = getFirestore(app);
     state.remoteEnabled = true;
     await seedRemoteUsers();
-    await seedRemoteItems("bets", state.bets, (item) => item.id);
-    await seedRemoteItems("settlements", state.settlements, (item) => item.matchId);
-    await seedRemoteItems("manualScores", state.manualScores, (item) => item.matchId);
     subscribeToRemoteCollection("users", applyRemoteUsers);
     subscribeToRemoteCollection("bets", applyRemoteBets);
     subscribeToRemoteCollection("settlements", applyRemoteSettlements);
     subscribeToRemoteCollection("manualScores", applyRemoteManualScores);
   } catch (error) {
-    console.warn("Firebase no esta disponible. Usando localStorage.", error);
+    console.warn("Firebase no esta disponible.", error);
     state.remoteEnabled = false;
+    elements.sourceLabel.textContent = "Firebase no conectado";
   }
 }
 
@@ -268,20 +235,6 @@ async function seedRemoteUsers() {
   await batch.commit();
 }
 
-async function seedRemoteItems(collectionName, items, getId) {
-  if (!items.length) return;
-
-  const snapshot = await getDocs(remoteCollection(collectionName));
-  if (!snapshot.empty) return;
-
-  const batch = writeBatch(state.db);
-  items.forEach((item) => {
-    const id = getId(item);
-    if (id) batch.set(remoteDoc(collectionName, id), item);
-  });
-  await batch.commit();
-}
-
 function subscribeToRemoteCollection(name, onData) {
   const unsubscribe = onSnapshot(remoteCollection(name), (snapshot) => {
     onData(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
@@ -297,9 +250,8 @@ function applyRemoteUsers(items) {
     .map((item) => item.name)
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b, "es"));
-  state.users = users.length > 0 ? users : DEFAULT_USERS;
-  if (!state.users.includes(state.activeUser)) state.activeUser = state.users[0];
-  localStorage.setItem(STORAGE_KEYS.activeUser, state.activeUser);
+  state.users = users;
+  if (!state.users.includes(state.activeUser)) state.activeUser = state.users[0] || "";
 }
 
 function applyRemoteBets(items) {
@@ -320,77 +272,59 @@ function applyRemoteManualScores(items) {
 }
 
 async function persistUser(name) {
-  if (!state.remoteEnabled) {
-    saveState();
-    return;
-  }
+  ensureFirebaseReady();
 
   await setDoc(remoteDoc("users", getUserId(name)), {
     name,
     createdAt: new Date().toISOString(),
   });
-  localStorage.setItem(STORAGE_KEYS.activeUser, name);
 }
 
 async function deleteUser(name) {
-  state.users = state.users.filter((user) => normalize(user) !== normalize(name));
-  if (state.users.length === 0) state.users = [...DEFAULT_USERS];
-  state.activeUser = state.users[0];
-  localStorage.setItem(STORAGE_KEYS.activeUser, state.activeUser);
-
-  if (!state.remoteEnabled) {
-    saveState();
-    return;
-  }
+  ensureFirebaseReady();
 
   await deleteDoc(remoteDoc("users", getUserId(name)));
+  state.users = state.users.filter((user) => normalize(user) !== normalize(name));
+  state.activeUser = state.users[0] || "";
 }
 
 async function persistBet(bet) {
-  if (!state.remoteEnabled) {
-    saveState();
-    return;
-  }
+  ensureFirebaseReady();
 
   await setDoc(remoteDoc("bets", bet.id), bet);
 }
 
 async function deleteBet(id) {
-  if (!state.remoteEnabled) {
-    state.bets = state.bets.filter((bet) => bet.id !== id);
-    saveState();
-    renderAll();
-    return;
-  }
+  ensureFirebaseReady();
 
   await deleteDoc(remoteDoc("bets", id));
+  state.bets = state.bets.filter((bet) => bet.id !== id);
+  renderAll();
 }
 
 async function persistSettlement(settlement) {
+  ensureFirebaseReady();
+
+  await setDoc(remoteDoc("settlements", settlement.matchId), settlement);
   const existingIndex = state.settlements.findIndex((item) => item.matchId === settlement.matchId);
   if (existingIndex >= 0) state.settlements.splice(existingIndex, 1, settlement);
   else state.settlements.unshift(settlement);
-
-  if (!state.remoteEnabled) {
-    saveState();
-    return;
-  }
-
-  await setDoc(remoteDoc("settlements", settlement.matchId), settlement);
 }
 
 async function persistManualScore(score) {
+  ensureFirebaseReady();
+
+  await setDoc(remoteDoc("manualScores", score.matchId), score);
   const existingIndex = state.manualScores.findIndex((item) => item.matchId === score.matchId);
   if (existingIndex >= 0) state.manualScores.splice(existingIndex, 1, score);
   else state.manualScores.unshift(score);
   applyManualScoresToMatches();
+}
 
-  if (!state.remoteEnabled) {
-    saveState();
-    return;
+function ensureFirebaseReady() {
+  if (!state.remoteEnabled || !state.db) {
+    throw new Error("Firebase no esta conectado. No se guardo ningun dato.");
   }
-
-  await setDoc(remoteDoc("manualScores", score.matchId), score);
 }
 
 function getUserId(name) {
@@ -401,13 +335,16 @@ async function addUser() {
   const name = toTitleName(elements.newUserInput.value);
   if (!name) return;
 
-  const exists = state.users.some((user) => normalize(user) === normalize(name));
-  if (!exists) state.users.push(name);
-
-  state.activeUser = state.users.find((user) => normalize(user) === normalize(name)) || name;
-  elements.newUserInput.value = "";
-  await persistUser(state.activeUser);
-  renderAll();
+  try {
+    await persistUser(name);
+    const existingUser = state.users.find((user) => normalize(user) === normalize(name));
+    if (!existingUser) state.users.push(name);
+    state.activeUser = existingUser || name;
+    elements.newUserInput.value = "";
+    renderAll();
+  } catch (error) {
+    window.alert(error.message);
+  }
 }
 
 async function deleteActiveUser() {
@@ -422,8 +359,12 @@ async function deleteActiveUser() {
   const confirmed = window.confirm(`${warning}\n\nQuieres continuar?`);
   if (!confirmed) return;
 
-  await deleteUser(user);
-  renderAll();
+  try {
+    await deleteUser(user);
+    renderAll();
+  } catch (error) {
+    window.alert(error.message);
+  }
 }
 
 function handleLiveBetToggle() {
@@ -477,7 +418,7 @@ async function loadMatches() {
 }
 
 function getStorageLabel() {
-  return state.remoteEnabled ? "Firebase" : "localStorage";
+  return state.remoteEnabled ? "Firebase" : "Firebase no conectado";
 }
 
 async function fetchApiFootballMatchesForBoliviaDate(dateIso) {
@@ -635,6 +576,7 @@ function renderUsers() {
     .map((user) => `<option value="${escapeHtml(user)}">${escapeHtml(user)}</option>`)
     .join("");
   elements.userSelect.value = state.activeUser;
+  elements.userSelect.disabled = state.users.length === 0;
 }
 
 function renderShell() {
@@ -642,8 +584,8 @@ function renderShell() {
   elements.matchesTitle.textContent = isTodayIso(state.todayIso)
     ? "Cartelera de hoy"
     : `Cartelera ${formatShortDate(state.todayIso)}`;
-  elements.activeUserLabel.textContent = state.activeUser;
-  elements.ticketUserLabel.textContent = state.activeUser;
+  elements.activeUserLabel.textContent = state.activeUser || "Sin usuario";
+  elements.ticketUserLabel.textContent = state.activeUser || "Sin usuario";
   elements.ticketPoolLabel.textContent = formatCurrency(getCurrentPot());
   elements.ticketBetCountLabel.textContent = state.bets.length;
   elements.liveBetToggle.checked = state.liveBettingEnabled;
@@ -906,6 +848,11 @@ async function placeBet() {
     return;
   }
 
+  if (!state.activeUser) {
+    showFormMessage("Agrega o selecciona un usuario antes de apostar.", true);
+    return;
+  }
+
   if (!Number.isFinite(amount) || amount < 1) {
     showFormMessage("Ingresa un monto valido.", true);
     return;
@@ -926,13 +873,16 @@ async function placeBet() {
     createdAt: new Date().toISOString(),
   };
 
-  if (existingIndex >= 0) state.bets.splice(existingIndex, 1, bet);
-  else state.bets.unshift(bet);
-
-  await persistBet(bet);
-  showFormMessage(existingIndex >= 0 ? "Apuesta actualizada." : "Apuesta registrada.");
-  renderAll();
-  setTimeout(closeBetModal, 350);
+  try {
+    await persistBet(bet);
+    if (existingIndex >= 0) state.bets.splice(existingIndex, 1, bet);
+    else state.bets.unshift(bet);
+    showFormMessage(existingIndex >= 0 ? "Apuesta actualizada." : "Apuesta registrada.");
+    renderAll();
+    setTimeout(closeBetModal, 350);
+  } catch (error) {
+    showFormMessage(error.message, true);
+  }
 }
 
 function showFormMessage(message, isError = false) {
@@ -956,7 +906,11 @@ function renderBets() {
   elements.betsList.innerHTML = state.bets.map(renderBetItem).join("");
   elements.betsList.querySelectorAll("[data-remove-bet]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await deleteBet(button.dataset.removeBet);
+      try {
+        await deleteBet(button.dataset.removeBet);
+      } catch (error) {
+        window.alert(error.message);
+      }
     });
   });
 }
@@ -1027,9 +981,13 @@ async function processFinishedMatches(shouldOpenModal = false) {
     const resultChoice = getResultChoice(match);
     if (resultChoice) {
       const settlement = createSettlement(match, resultChoice, "automatico");
-      await persistSettlement(settlement);
-      changed = true;
-      if (!matchToOpen) matchToOpen = match.id;
+      try {
+        await persistSettlement(settlement);
+        changed = true;
+        if (!matchToOpen) matchToOpen = match.id;
+      } catch (error) {
+        console.warn(error);
+      }
       continue;
     }
 
@@ -1037,7 +995,6 @@ async function processFinishedMatches(shouldOpenModal = false) {
   }
 
   if (changed) {
-    saveState();
     renderMatches();
     renderBets();
   }
@@ -1117,10 +1074,14 @@ function renderSettlementModal(match) {
 async function settleMatchManually(match, resultChoice) {
   if (getSettlement(match.id)) return;
   const settlement = createSettlement(match, resultChoice, "manual");
-  await persistSettlement(settlement);
-  renderMatches();
-  renderBets();
-  renderSettlementModal(match);
+  try {
+    await persistSettlement(settlement);
+    renderMatches();
+    renderBets();
+    renderSettlementModal(match);
+  } catch (error) {
+    window.alert(error.message);
+  }
 }
 
 function renderSettlementSummary(settlement) {
@@ -1288,18 +1249,22 @@ async function saveManualScoreFromResults(matchId) {
 
   if (!match || !Number.isFinite(homeScore) || !Number.isFinite(awayScore)) return;
 
-  await persistManualScore({
-    matchId,
-    homeTeam: match.homeTeam,
-    awayTeam: match.awayTeam,
-    homeScore,
-    awayScore,
-    updatedAt: new Date().toISOString(),
-    updatedBy: state.activeUser,
-  });
+  try {
+    await persistManualScore({
+      matchId,
+      homeTeam: match.homeTeam,
+      awayTeam: match.awayTeam,
+      homeScore,
+      awayScore,
+      updatedAt: new Date().toISOString(),
+      updatedBy: state.activeUser,
+    });
 
-  renderAll();
-  renderResultsModal();
+    renderAll();
+    renderResultsModal();
+  } catch (error) {
+    window.alert(error.message);
+  }
 }
 
 function renderProjectionNotice(projection, resultChoice) {

@@ -29,8 +29,7 @@ Sistema web estatico para registrar apuestas amistosas del Mundial 2026.
 - Si el partido termina empatado, nadie cobra y el pozo se acumula para el siguiente partido.
 - Historial final de ganadores, perdedores y pagos.
 - Marcador final guardado dentro del historial de cada partido liquidado.
-- Persistencia local con `localStorage` si Firebase no esta configurado.
-- Persistencia compartida con Firebase Firestore cuando se completa `firebase-config.js`.
+- Persistencia compartida solo con Firebase Firestore.
 
 ## Liquidacion de apuestas
 
@@ -161,9 +160,9 @@ En Windows tambien puedes abrir `iniciar.bat`.
 
 ## Base de datos compartida con Firebase
 
-La app ya esta preparada para Firebase Firestore. Si `firebase-config.js` esta vacio, usa
-`localStorage` y los datos solo se ven en cada navegador. Si completas `firebase-config.js`, todos
-los usuarios, apuestas, liquidaciones, pozo e historial se comparten entre dispositivos.
+La app usa Firebase Firestore como unica base de datos. Si Firebase no esta configurado o las reglas
+no permiten escritura, la app no guarda datos locales: usuarios, apuestas, liquidaciones, pozo e
+historial deben salir de Firestore.
 
 Pasos:
 
