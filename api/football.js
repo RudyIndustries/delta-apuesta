@@ -18,32 +18,27 @@ export default async function handler(request, response) {
   }
 
   try {
-    const url = new URL(`${API_FOOTBALL_BASE_URL}/fixtures`);
-    url.searchParams.set("date", date);
-    url.searchParams.set("league", league);
-    url.searchParams.set("season", season);
-    url.searchParams.set("timezone", process.env.APISPORTS_TIMEZONE || DEFAULT_TIMEZONE);
-
-    const apiResponse = await fetch(url, {
-      headers: {
-        "x-apisports-key": apiKey,
-      },
-    });
-
-    const data = await apiResponse.json();
-
-    if (!apiResponse.ok) {
-      response.status(apiResponse.status).json({
+    const leagueData = await fetchFixtures({ apiKey, date, league, season, withLeague: true });
+    if (!leagueData.ok) {
+      response.status(leagueData.status).json({
         configured: true,
-        error: data?.message || "No se pudo consultar API-Football",
+        error: leagueData.error || "No se pudo consultar API-Football",
         events: [],
       });
       return;
     }
 
+    let events = leagueData.events;
+
+    if (events.length === 0) {
+      const dateData = await fetchFixtures({ apiKey, date, league, season, withLeague: false });
+      if (dateData.ok) events = dateData.events.filter(isWorldCupFixture);
+    }
+
     response.status(200).json({
       configured: true,
-      events: Array.isArray(data.response) ? data.response : [],
+      source: events.length > 0 ? "api-football" : "api-football-empty",
+      events,
     });
   } catch (error) {
     response.status(500).json({
@@ -52,4 +47,38 @@ export default async function handler(request, response) {
       events: [],
     });
   }
+}
+
+async function fetchFixtures({ apiKey, date, league, season, withLeague }) {
+  const url = new URL(`${API_FOOTBALL_BASE_URL}/fixtures`);
+  url.searchParams.set("date", date);
+  url.searchParams.set("timezone", process.env.APISPORTS_TIMEZONE || DEFAULT_TIMEZONE);
+  if (withLeague) {
+    url.searchParams.set("league", league);
+    url.searchParams.set("season", season);
+  }
+
+  const apiResponse = await fetch(url, {
+    headers: {
+      "x-apisports-key": apiKey,
+    },
+  });
+  const data = await apiResponse.json();
+
+  return {
+    ok: apiResponse.ok,
+    status: apiResponse.status,
+    error: data?.message || data?.errors,
+    events: Array.isArray(data.response) ? data.response : [],
+  };
+}
+
+function isWorldCupFixture(event) {
+  const league = event?.league || {};
+  const text = [league.id, league.name, league.round, league.country]
+    .filter((value) => value !== undefined && value !== null)
+    .join(" ")
+    .toLowerCase();
+
+  return text.includes("world cup") || text.includes("fifa") || String(league.id) === "1";
 }

@@ -11,7 +11,7 @@ Sistema web estatico para registrar apuestas amistosas del Mundial 2026.
 - Menu de dias para cambiar fecha y verificar partidos por dia.
 - Fuente principal: TheSportsDB API gratuita.
 - Fuente opcional prioritaria: API-Football / API-Sports para marcadores mas completos.
-- Respaldo local para los partidos del Mundial 2026 del 16 de junio.
+- La cartelera apostable se toma de API-Football o TheSportsDB; si no hay respuesta, no se inventan partidos.
 - Marcar como no disponibles los partidos que ya empezaron o terminaron.
 - Apostar por local, empate o visitante.
 - Montos rapidos: 5, 10, 15, 20, 30, 50 y 100 Bs.
@@ -73,7 +73,7 @@ calcular pagos proyectados y liquidar el partido si la API no trae resultado fin
 
 La app intenta usar primero `/api/football`, una funcion serverless de Vercel que consulta
 API-Football / API-Sports. Si no esta configurada o no devuelve partidos, cae automaticamente a
-TheSportsDB y luego al respaldo local.
+TheSportsDB. Si ninguna API devuelve partidos para esa fecha, la cartelera queda vacia.
 
 Para activarla:
 

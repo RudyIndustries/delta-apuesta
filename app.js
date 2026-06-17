@@ -24,89 +24,6 @@ const STORAGE_KEYS = {
   manualScores: "delta-apuesta-manual-scores",
 };
 
-const FALLBACK_MATCHES = [
-  {
-    id: "wc2026-2026-06-16-france-senegal",
-    date: "2026-06-16",
-    kickoffUtc: "2026-06-16T19:00:00Z",
-    homeTeam: "Francia",
-    awayTeam: "Senegal",
-    group: "Grupo I",
-    venue: "New York New Jersey Stadium",
-    source: "Respaldo local",
-  },
-  {
-    id: "wc2026-2026-06-16-iraq-norway",
-    date: "2026-06-16",
-    kickoffUtc: "2026-06-16T22:00:00Z",
-    homeTeam: "Irak",
-    awayTeam: "Noruega",
-    group: "Grupo I",
-    venue: "Boston Stadium",
-    source: "Respaldo local",
-  },
-  {
-    id: "wc2026-2026-06-16-argentina-algeria",
-    date: "2026-06-16",
-    kickoffUtc: "2026-06-17T01:00:00Z",
-    homeTeam: "Argentina",
-    awayTeam: "Argelia",
-    group: "Grupo J",
-    venue: "Kansas City Stadium",
-    source: "Respaldo local",
-  },
-  {
-    id: "wc2026-2026-06-16-austria-jordan",
-    date: "2026-06-16",
-    kickoffUtc: "2026-06-17T03:00:00Z",
-    homeTeam: "Austria",
-    awayTeam: "Jordania",
-    group: "Grupo J",
-    venue: "San Francisco Bay Area Stadium",
-    source: "Respaldo local",
-  },
-  {
-    id: "wc2026-2026-06-17-portugal-congo-dr",
-    date: "2026-06-17",
-    kickoffUtc: "2026-06-17T17:00:00Z",
-    homeTeam: "Portugal",
-    awayTeam: "Congo DR",
-    group: "Grupo K",
-    venue: "Houston Stadium",
-    source: "Respaldo local",
-  },
-  {
-    id: "wc2026-2026-06-17-england-croatia",
-    date: "2026-06-17",
-    kickoffUtc: "2026-06-17T20:00:00Z",
-    homeTeam: "Inglaterra",
-    awayTeam: "Croacia",
-    group: "Grupo L",
-    venue: "Dallas Stadium",
-    source: "Respaldo local",
-  },
-  {
-    id: "wc2026-2026-06-17-ghana-panama",
-    date: "2026-06-17",
-    kickoffUtc: "2026-06-17T23:00:00Z",
-    homeTeam: "Ghana",
-    awayTeam: "Panama",
-    group: "Grupo L",
-    venue: "Toronto Stadium",
-    source: "Respaldo local",
-  },
-  {
-    id: "wc2026-2026-06-17-uzbekistan-colombia",
-    date: "2026-06-17",
-    kickoffUtc: "2026-06-18T02:00:00Z",
-    homeTeam: "Uzbekistan",
-    awayTeam: "Colombia",
-    group: "Grupo K",
-    venue: "Mexico City Stadium",
-    source: "Respaldo local",
-  },
-];
-
 const state = {
   users: [],
   activeUser: "",
@@ -536,28 +453,26 @@ function canBetOnMatch(match) {
 }
 
 async function loadMatches() {
-  const fallback = getFallbackMatchesForDate(state.todayIso);
   try {
     const apiFootballMatches = await fetchApiFootballMatchesForBoliviaDate(state.todayIso);
     if (apiFootballMatches.length > 0) {
-      state.matches = sortMatches(mergeMatches(apiFootballMatches, fallback));
+      state.matches = sortMatches(apiFootballMatches);
       applyManualScoresToMatches();
       elements.sourceLabel.textContent = `API-Football + ${getStorageLabel()}`;
       return;
     }
 
     const apiMatches = await fetchSportsDbMatchesForBoliviaDate(state.todayIso);
-    const merged = mergeMatches(apiMatches, fallback);
-    state.matches = sortMatches(merged);
+    state.matches = sortMatches(apiMatches);
     applyManualScoresToMatches();
     elements.sourceLabel.textContent =
       apiMatches.length > 0
         ? `TheSportsDB + ${getStorageLabel()}`
-        : `Respaldo local + ${getStorageLabel()}`;
+        : `Sin partidos API + ${getStorageLabel()}`;
   } catch (error) {
-    state.matches = sortMatches(fallback);
+    state.matches = [];
     applyManualScoresToMatches();
-    elements.sourceLabel.textContent = `Respaldo local + ${getStorageLabel()}`;
+    elements.sourceLabel.textContent = `Error API + ${getStorageLabel()}`;
   }
 }
 
@@ -674,38 +589,10 @@ function buildUtcFromDateTime(date, time) {
   return `${date}T${cleanTime}Z`;
 }
 
-function getFallbackMatchesForDate(dateIso) {
-  return FALLBACK_MATCHES.filter((match) => match.date === dateIso);
-}
-
 function addDaysIso(dateIso, days) {
   const [year, month, day] = dateIso.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day + days, 12));
   return getBoliviaDateIso(date);
-}
-
-function mergeMatches(apiMatches, fallbackMatches) {
-  const map = new Map();
-  [...apiMatches, ...fallbackMatches].forEach((match) => {
-    const key = normalize(`${match.date}-${match.homeTeam}-${match.awayTeam}`);
-    if (!map.has(key)) {
-      map.set(key, match);
-      return;
-    }
-
-    const current = map.get(key);
-    map.set(key, {
-      ...current,
-      ...match,
-      kickoffUtc: current.kickoffUtc || match.kickoffUtc,
-      homeScore: current.homeScore ?? match.homeScore,
-      awayScore: current.awayScore ?? match.awayScore,
-      status: current.status || match.status,
-      source:
-        current.source === match.source ? current.source : `${current.source} + ${match.source}`,
-    });
-  });
-  return [...map.values()];
 }
 
 function applyManualScoresToMatches() {
