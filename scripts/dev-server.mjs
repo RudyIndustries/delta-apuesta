@@ -49,6 +49,7 @@ async function handleApiFootball(url, response) {
   const date = url.searchParams.get("date");
   const league = process.env.APISPORTS_LEAGUE_ID || "1";
   const season = process.env.APISPORTS_SEASON || "2026";
+  const timezone = process.env.APISPORTS_TIMEZONE || "America/La_Paz";
 
   if (!apiKey) {
     sendJson(response, 200, { configured: false, events: [] });
@@ -65,6 +66,7 @@ async function handleApiFootball(url, response) {
     apiUrl.searchParams.set("date", date);
     apiUrl.searchParams.set("league", league);
     apiUrl.searchParams.set("season", season);
+    apiUrl.searchParams.set("timezone", timezone);
 
     const apiResponse = await fetch(apiUrl, {
       headers: { "x-apisports-key": apiKey },

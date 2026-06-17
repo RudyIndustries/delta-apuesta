@@ -1,4 +1,5 @@
 const API_FOOTBALL_BASE_URL = "https://v3.football.api-sports.io";
+const DEFAULT_TIMEZONE = "America/La_Paz";
 
 export default async function handler(request, response) {
   const apiKey = process.env.APISPORTS_KEY;
@@ -21,6 +22,7 @@ export default async function handler(request, response) {
     url.searchParams.set("date", date);
     url.searchParams.set("league", league);
     url.searchParams.set("season", season);
+    url.searchParams.set("timezone", process.env.APISPORTS_TIMEZONE || DEFAULT_TIMEZONE);
 
     const apiResponse = await fetch(url, {
       headers: {

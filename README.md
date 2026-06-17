@@ -86,12 +86,14 @@ Para activarla:
 APISPORTS_KEY=tu_api_key
 APISPORTS_LEAGUE_ID=1
 APISPORTS_SEASON=2026
+APISPORTS_TIMEZONE=America/La_Paz
 ```
 
 6. Guarda y redeploya el proyecto.
 
 `APISPORTS_LEAGUE_ID=1` corresponde a FIFA World Cup en API-Football. Si el proveedor cambia el id
-para 2026, solo actualiza esa variable en Vercel.
+para 2026, solo actualiza esa variable en Vercel. La zona horaria `America/La_Paz` ayuda a que los
+partidos de "hoy" salgan con fecha boliviana.
 
 Para probar localmente puedes crear un archivo `.env` con las mismas variables o ejecutar PowerShell:
 
