@@ -1397,7 +1397,12 @@ function renderHistoryModal() {
               <p class="eyebrow">${formatBoliviaDateTime(settlement.settledAt)}</p>
               <h3>${escapeHtml(settlement.matchLabel)}</h3>
             </div>
-            <span class="pill available">${formatCurrency(settlement.totalPool)}</span>
+            <div class="history-actions">
+              <span class="pill available">${formatCurrency(settlement.totalPool)}</span>
+              <button type="button" data-edit-settlement-score="${escapeHtml(settlement.matchId)}">
+                Editar marcador
+              </button>
+            </div>
           </header>
           ${renderFinalScoreCard(settlement)}
           <p>Resultado ganador: <strong>${escapeHtml(settlement.resultLabel)}</strong></p>
@@ -1409,6 +1414,10 @@ function renderHistoryModal() {
       `,
     )
     .join("");
+
+  elements.historyList.querySelectorAll("[data-edit-settlement-score]").forEach((button) => {
+    button.addEventListener("click", () => editSettlementScore(button.dataset.editSettlementScore));
+  });
 }
 
 function renderFinalScoreCard(settlement) {
@@ -1483,6 +1492,42 @@ function hasSettlementScore(settlement) {
 
 function getTeamFromMatchLabel(matchLabel, index) {
   return String(matchLabel || "").split(" vs ")[index] || "";
+}
+
+async function editSettlementScore(matchId) {
+  const settlement = getSettlement(matchId);
+  if (!settlement) return;
+
+  const homeTeam = settlement.homeTeam || getTeamFromMatchLabel(settlement.matchLabel, 0) || "Local";
+  const awayTeam = settlement.awayTeam || getTeamFromMatchLabel(settlement.matchLabel, 1) || "Visitante";
+  const currentHome = Number.isFinite(settlement.homeScore) ? settlement.homeScore : 0;
+  const currentAway = Number.isFinite(settlement.awayScore) ? settlement.awayScore : 0;
+  const homeValue = window.prompt(`Goles de ${homeTeam}`, String(currentHome));
+  if (homeValue === null) return;
+
+  const awayValue = window.prompt(`Goles de ${awayTeam}`, String(currentAway));
+  if (awayValue === null) return;
+
+  const homeScore = Math.max(0, Math.round(Number(homeValue)));
+  const awayScore = Math.max(0, Math.round(Number(awayValue)));
+  if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) {
+    window.alert("Marcador invalido.");
+    return;
+  }
+
+  const updatedSettlement = {
+    ...settlement,
+    homeTeam,
+    awayTeam,
+    homeScore,
+    awayScore,
+    resultLabel: `${settlement.result} (${homeScore}-${awayScore})`,
+    scoreEditedAt: new Date().toISOString(),
+    scoreEditedBy: state.activeUser,
+  };
+
+  await persistSettlement(updatedSettlement);
+  renderHistoryModal();
 }
 
 function distributePayouts(bets, resultChoice, totalPool, winnerPool, shouldCarryOver = false) {

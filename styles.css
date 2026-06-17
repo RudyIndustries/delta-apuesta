@@ -761,6 +761,22 @@ legend {
   gap: 12px;
 }
 
+.history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.history-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+  color: #07140d;
+  background: var(--gold);
+  border-color: var(--gold);
+  font-weight: 900;
+}
+
 .history-block p {
   margin-bottom: 0;
   color: var(--muted);
@@ -987,6 +1003,10 @@ legend {
   .live-result-block header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .history-actions {
+    justify-content: flex-start;
   }
 
   .payout-item > div:last-child {
