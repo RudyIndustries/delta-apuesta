@@ -8,9 +8,9 @@ Sistema web estatico para registrar apuestas amistosas del Mundial 2026.
 - Agregar nuevos usuarios escribiendo su nombre.
 - Borrar el usuario activo desde el panel superior.
 - Consultar partidos del dia con hora de Bolivia.
-- Menu de dias para cambiar fecha y verificar partidos por dia.
-- Fuente principal: TheSportsDB API gratuita.
-- Fuente opcional prioritaria: API-Football / API-Sports para marcadores mas completos.
+- Menu de dias para cambiar fecha y verificar partidos por dia, con dos semanas futuras visibles.
+- Fuente principal: API-Football / API-Sports.
+- Fuente de respaldo: TheSportsDB API gratuita.
 - La cartelera apostable se toma de API-Football o TheSportsDB; si no hay respuesta, no se inventan partidos.
 - Marcar como no disponibles los partidos que ya empezaron o terminaron.
 - Apostar por local, empate o visitante.
@@ -71,7 +71,9 @@ calcular pagos proyectados y liquidar el partido si la API no trae resultado fin
 ## API-Football para marcadores
 
 La app intenta usar primero `/api/football`, una funcion serverless de Vercel que consulta
-API-Football / API-Sports. Si no esta configurada o no devuelve partidos, cae automaticamente a
+API-Football / API-Sports por el dia completo en zona `America/La_Paz`. Combina la consulta por liga
+con una consulta general del dia filtrada por Mundial para evitar que falten partidos si el proveedor
+devuelve una liga incompleta. Si no esta configurada o no devuelve partidos, cae automaticamente a
 TheSportsDB. Si ninguna API devuelve partidos para esa fecha, la cartelera queda vacia.
 
 Para activarla:
@@ -85,15 +87,17 @@ Para activarla:
 ```text
 APISPORTS_KEY=tu_api_key
 APISPORTS_LEAGUE_ID=1
+APISPORTS_LEAGUE_IDS=1
 APISPORTS_SEASON=2026
 APISPORTS_TIMEZONE=America/La_Paz
 ```
 
 6. Guarda y redeploya el proyecto.
 
-`APISPORTS_LEAGUE_ID=1` corresponde a FIFA World Cup en API-Football. Si el proveedor cambia el id
-para 2026, solo actualiza esa variable en Vercel. La zona horaria `America/La_Paz` ayuda a que los
-partidos de "hoy" salgan con fecha boliviana.
+`APISPORTS_LEAGUE_ID=1` corresponde a FIFA World Cup en API-Football. Tambien puedes usar
+`APISPORTS_LEAGUE_IDS=1,otro_id` si el proveedor separa algun calendario. La zona horaria
+`America/La_Paz` ayuda a que los partidos de "hoy" salgan con fecha boliviana. La app muestra la hora
+usando el `timestamp` real de API-Football cuando esta disponible.
 
 Para probar localmente puedes crear un archivo `.env` con las mismas variables o ejecutar PowerShell:
 

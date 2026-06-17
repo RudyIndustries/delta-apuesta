@@ -16,6 +16,8 @@ const ADMIN_PASSWORD = "admin123";
 const FIREBASE_ROOM_ID = "delta-apuesta-main";
 const DEFAULT_USERS = ["Rene", "Cesar", "Rolando"];
 const QUICK_AMOUNTS = [5, 10, 15, 20, 30, 50, 100];
+const DAY_PICKER_PAST_DAYS = 3;
+const DAY_PICKER_FUTURE_DAYS = 14;
 
 const state = {
   users: [],
@@ -399,7 +401,7 @@ async function loadMatches() {
     if (apiFootballMatches.length > 0) {
       state.matches = sortMatches(apiFootballMatches);
       applyManualScoresToMatches();
-      elements.sourceLabel.textContent = `API-Football + ${getStorageLabel()}`;
+      elements.sourceLabel.textContent = `API-Football (${apiFootballMatches.length}) + ${getStorageLabel()}`;
       return;
     }
 
@@ -408,7 +410,7 @@ async function loadMatches() {
     applyManualScoresToMatches();
     elements.sourceLabel.textContent =
       apiMatches.length > 0
-        ? `TheSportsDB + ${getStorageLabel()}`
+        ? `TheSportsDB (${apiMatches.length}) + ${getStorageLabel()}`
         : `Sin partidos API + ${getStorageLabel()}`;
   } catch (error) {
     state.matches = [];
@@ -422,11 +424,8 @@ function getStorageLabel() {
 }
 
 async function fetchApiFootballMatchesForBoliviaDate(dateIso) {
-  const apiDates = [dateIso, addDaysIso(dateIso, 1)];
-  const batches = await Promise.all(apiDates.map(fetchApiFootballMatches));
-  return batches
-    .flat()
-    .filter((match) => getBoliviaDateIso(new Date(match.kickoffUtc)) === dateIso);
+  const matches = await fetchApiFootballMatches(dateIso);
+  return filterMatchesByBoliviaDate(matches, dateIso);
 }
 
 async function fetchApiFootballMatches(dateIso) {
@@ -437,7 +436,7 @@ async function fetchApiFootballMatches(dateIso) {
 
   const data = await response.json();
   if (!data.configured || !Array.isArray(data.events)) return [];
-  return data.events.map(mapApiFootballEvent).filter(Boolean);
+  return uniqueMatches(data.events.map(mapApiFootballEvent).filter(Boolean));
 }
 
 function mapApiFootballEvent(event) {
@@ -448,16 +447,18 @@ function mapApiFootballEvent(event) {
   const status = fixture.status || {};
   const homeTeam = teams.home?.name || "Local";
   const awayTeam = teams.away?.name || "Visitante";
-  const kickoffUtc = fixture.date;
+  const kickoffUtc = getApiFootballKickoffIso(fixture);
   if (!kickoffUtc) return null;
+  const kickoffDate = new Date(kickoffUtc);
+  const round = [league.name, league.round].filter(Boolean).join(" - ");
 
   return {
     id: fixture.id ? `api-football-${fixture.id}` : slugify(`${kickoffUtc}-${homeTeam}-${awayTeam}`),
-    date: kickoffUtc.slice(0, 10),
+    date: getBoliviaDateIso(kickoffDate),
     kickoffUtc,
     homeTeam,
     awayTeam,
-    group: league.round || league.name || "FIFA World Cup 2026",
+    group: round || "FIFA World Cup 2026",
     venue: fixture.venue?.name || "Sede por confirmar",
     status: [status.long, status.short, status.elapsed ? `${status.elapsed}'` : ""]
       .filter(Boolean)
@@ -469,11 +470,8 @@ function mapApiFootballEvent(event) {
 }
 
 async function fetchSportsDbMatchesForBoliviaDate(dateIso) {
-  const apiDates = [dateIso, addDaysIso(dateIso, 1)];
-  const batches = await Promise.all(apiDates.map(fetchSportsDbMatches));
-  return batches
-    .flat()
-    .filter((match) => getBoliviaDateIso(new Date(match.kickoffUtc)) === dateIso);
+  const matches = await fetchSportsDbMatches(dateIso);
+  return filterMatchesByBoliviaDate(matches, dateIso);
 }
 
 async function fetchSportsDbMatches(dateIso) {
@@ -507,11 +505,12 @@ function mapSportsDbEvent(event) {
   const awayTeam = event.strAwayTeam || "Visitante";
   const date = event.dateEvent || state.todayIso;
   const kickoffUtc = event.strTimestamp || buildUtcFromDateTime(date, event.strTime);
+  const kickoffDate = new Date(kickoffUtc);
   const status = [event.strStatus, event.strProgress, event.strResult].filter(Boolean).join(" ");
 
   return {
     id: event.idEvent || slugify(`${date}-${homeTeam}-${awayTeam}`),
-    date,
+    date: getBoliviaDateIso(kickoffDate),
     kickoffUtc,
     homeTeam,
     awayTeam,
@@ -528,6 +527,38 @@ function buildUtcFromDateTime(date, time) {
   if (!time) return `${date}T12:00:00Z`;
   const cleanTime = time.split("+")[0].replace("Z", "").slice(0, 8);
   return `${date}T${cleanTime}Z`;
+}
+
+function getApiFootballKickoffIso(fixture) {
+  const timestamp = Number(fixture.timestamp);
+  if (Number.isFinite(timestamp) && timestamp > 0) {
+    return new Date(timestamp * 1000).toISOString();
+  }
+
+  if (fixture.date && !Number.isNaN(new Date(fixture.date).getTime())) {
+    return new Date(fixture.date).toISOString();
+  }
+
+  return "";
+}
+
+function filterMatchesByBoliviaDate(matches, dateIso) {
+  return uniqueMatches(
+    matches.filter((match) => {
+      const date = new Date(match.kickoffUtc);
+      return !Number.isNaN(date.getTime()) && getBoliviaDateIso(date) === dateIso;
+    }),
+  );
+}
+
+function uniqueMatches(matches) {
+  const seen = new Set();
+  return matches.filter((match) => {
+    const key = match.id || slugify(`${match.kickoffUtc}-${match.homeTeam}-${match.awayTeam}`);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function addDaysIso(dateIso, days) {
@@ -596,7 +627,11 @@ function renderShell() {
 
 function renderDayPicker() {
   const centerDate = parseIsoDate(getBoliviaDateIso(new Date()));
-  const days = [-3, -2, -1, 0, 1, 2, 3].map((offset) => {
+  const offsets = Array.from(
+    { length: DAY_PICKER_PAST_DAYS + DAY_PICKER_FUTURE_DAYS + 1 },
+    (_, index) => index - DAY_PICKER_PAST_DAYS,
+  );
+  const days = offsets.map((offset) => {
     const date = new Date(centerDate);
     date.setUTCDate(date.getUTCDate() + offset);
     return getBoliviaDateIso(date);
