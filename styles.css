@@ -766,6 +766,39 @@ legend {
   color: var(--muted);
 }
 
+.final-score-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.final-score-card div {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  min-width: 0;
+}
+
+.final-score-card span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.final-score-card strong {
+  font-size: clamp(2rem, 6vw, 3.6rem);
+  line-height: 0.95;
+}
+
 .results-empty {
   min-height: 160px;
   display: grid;
@@ -916,6 +949,7 @@ legend {
   .settlement-summary,
   .result-grid,
   .payout-item,
+  .final-score-card,
   .scoreboard,
   .manual-score-form,
   .live-summary {

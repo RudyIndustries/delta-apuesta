@@ -1141,6 +1141,7 @@ function renderSettlementSummary(settlement) {
       : "";
 
   return `
+    ${renderFinalScoreCard(settlement)}
     <div class="settlement-summary">
       <div>
         <span>${formatCurrency(settlement.totalPool)}</span>
@@ -1398,6 +1399,7 @@ function renderHistoryModal() {
             </div>
             <span class="pill available">${formatCurrency(settlement.totalPool)}</span>
           </header>
+          ${renderFinalScoreCard(settlement)}
           <p>Resultado ganador: <strong>${escapeHtml(settlement.resultLabel)}</strong></p>
           ${renderHistoryCarryoverLine(settlement)}
           <div class="payout-list">
@@ -1407,6 +1409,26 @@ function renderHistoryModal() {
       `,
     )
     .join("");
+}
+
+function renderFinalScoreCard(settlement) {
+  if (!hasSettlementScore(settlement)) return "";
+
+  const homeTeam = settlement.homeTeam || getTeamFromMatchLabel(settlement.matchLabel, 0);
+  const awayTeam = settlement.awayTeam || getTeamFromMatchLabel(settlement.matchLabel, 1);
+  return `
+    <div class="final-score-card">
+      <div>
+        <span>${escapeHtml(homeTeam)}</span>
+        <strong>${settlement.homeScore}</strong>
+      </div>
+      <span class="score-separator">-</span>
+      <div>
+        <span>${escapeHtml(awayTeam)}</span>
+        <strong>${settlement.awayScore}</strong>
+      </div>
+    </div>
+  `;
 }
 
 function renderHistoryCarryoverLine(settlement) {
@@ -1437,6 +1459,10 @@ function createSettlement(match, resultChoice, source) {
     id: crypto.randomUUID(),
     matchId: match.id,
     matchLabel: `${match.homeTeam} vs ${match.awayTeam}`,
+    homeTeam: match.homeTeam,
+    awayTeam: match.awayTeam,
+    homeScore: hasFinalScore(match) ? match.homeScore : undefined,
+    awayScore: hasFinalScore(match) ? match.awayScore : undefined,
     kickoffUtc: match.kickoffUtc,
     result: resultChoice,
     resultLabel: getResultLabel(match, resultChoice),
@@ -1449,6 +1475,14 @@ function createSettlement(match, resultChoice, source) {
     source,
     settledAt: new Date().toISOString(),
   };
+}
+
+function hasSettlementScore(settlement) {
+  return Number.isFinite(settlement.homeScore) && Number.isFinite(settlement.awayScore);
+}
+
+function getTeamFromMatchLabel(matchLabel, index) {
+  return String(matchLabel || "").split(" vs ")[index] || "";
 }
 
 function distributePayouts(bets, resultChoice, totalPool, winnerPool, shouldCarryOver = false) {

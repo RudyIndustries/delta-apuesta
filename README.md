@@ -27,6 +27,7 @@ Sistema web estatico para registrar apuestas amistosas del Mundial 2026.
 - Reparto del pozo acumulado entre quienes acertaron.
 - Si el partido termina empatado, nadie cobra y el pozo se acumula para el siguiente partido.
 - Historial final de ganadores, perdedores y pagos.
+- Marcador final guardado dentro del historial de cada partido liquidado.
 - Persistencia local con `localStorage` si Firebase no esta configurado.
 - Persistencia compartida con Firebase Firestore cuando se completa `firebase-config.js`.
 
