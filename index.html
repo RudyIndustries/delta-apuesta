@@ -31,7 +31,7 @@
 
       <section class="status-strip" aria-live="polite">
         <div>
-          <p class="eyebrow">Hoy en Bolivia</p>
+          <p class="eyebrow">Fecha seleccionada</p>
           <strong id="todayLabel">Cargando fecha...</strong>
         </div>
         <div>
@@ -117,11 +117,12 @@
           <div class="section-heading">
             <div>
               <p class="eyebrow">Partidos disponibles</p>
-              <h2>Cartelera de hoy</h2>
+              <h2 id="matchesTitle">Cartelera de hoy</h2>
             </div>
             <button id="refreshButton" type="button">Actualizar</button>
           </div>
 
+          <div id="dayPicker" class="day-picker" aria-label="Seleccionar fecha de partidos"></div>
           <div id="matchesList" class="matches-list" aria-live="polite"></div>
         </section>
 

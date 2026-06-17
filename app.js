@@ -152,6 +152,8 @@ const elements = {
   placeBetButton: document.querySelector("#placeBetButton"),
   formMessage: document.querySelector("#formMessage"),
   refreshButton: document.querySelector("#refreshButton"),
+  matchesTitle: document.querySelector("#matchesTitle"),
+  dayPicker: document.querySelector("#dayPicker"),
   matchesList: document.querySelector("#matchesList"),
   betsList: document.querySelector("#betsList"),
   clearMyBetsButton: document.querySelector("#clearMyBetsButton"),
@@ -734,6 +736,7 @@ function sortMatches(matches) {
 function renderAll() {
   renderUsers();
   renderShell();
+  renderDayPicker();
   renderMatches();
   renderBetForm();
   renderBets();
@@ -749,6 +752,9 @@ function renderUsers() {
 
 function renderShell() {
   elements.todayLabel.textContent = formatBoliviaDate(state.todayIso);
+  elements.matchesTitle.textContent = isTodayIso(state.todayIso)
+    ? "Cartelera de hoy"
+    : `Cartelera ${formatShortDate(state.todayIso)}`;
   elements.activeUserLabel.textContent = state.activeUser;
   elements.ticketUserLabel.textContent = state.activeUser;
   elements.ticketPoolLabel.textContent = formatCurrency(getCurrentPot());
@@ -759,10 +765,68 @@ function renderShell() {
     : "Bloqueado";
 }
 
+function renderDayPicker() {
+  const centerDate = parseIsoDate(getBoliviaDateIso(new Date()));
+  const days = [-3, -2, -1, 0, 1, 2, 3].map((offset) => {
+    const date = new Date(centerDate);
+    date.setUTCDate(date.getUTCDate() + offset);
+    return getBoliviaDateIso(date);
+  });
+
+  elements.dayPicker.innerHTML = days.map(renderDayButton).join("");
+  elements.dayPicker.querySelectorAll("[data-day]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const dateIso = button.dataset.day;
+      if (!dateIso || dateIso === state.todayIso) return;
+      state.todayIso = dateIso;
+      state.selectedMatchId = "";
+      elements.sourceLabel.textContent = "Actualizando...";
+      renderAll();
+      await loadMatches();
+      renderAll();
+      processFinishedMatches(true);
+    });
+  });
+}
+
+function renderDayButton(dateIso) {
+  const date = parseIsoDate(dateIso);
+  const isSelected = dateIso === state.todayIso;
+  const isToday = isTodayIso(dateIso);
+  const weekday = new Intl.DateTimeFormat("es-BO", {
+    weekday: "short",
+    timeZone: BOLIVIA_TIME_ZONE,
+  })
+    .format(date)
+    .replace(".", "")
+    .toUpperCase();
+  const day = new Intl.DateTimeFormat("es-BO", {
+    day: "2-digit",
+    timeZone: BOLIVIA_TIME_ZONE,
+  }).format(date);
+  const month = new Intl.DateTimeFormat("es-BO", {
+    month: "short",
+    timeZone: BOLIVIA_TIME_ZONE,
+  })
+    .format(date)
+    .replace(".", "")
+    .toUpperCase();
+
+  return `
+    <button class="day-button ${isSelected ? "active" : ""}" type="button" data-day="${dateIso}">
+      <span>${isToday ? "HOY" : weekday}</span>
+      <strong>${day}</strong>
+      <small>${month}</small>
+    </button>
+  `;
+}
+
 function renderMatches() {
   if (state.matches.length === 0) {
     elements.matchesList.innerHTML =
-      '<div class="empty-state">No hay partidos del Mundial 2026 registrados para hoy en Bolivia.</div>';
+      `<div class="empty-state">No hay partidos del Mundial 2026 registrados para ${escapeHtml(
+        formatShortDate(state.todayIso),
+      )}. Si API-Football no devuelve datos para esa fecha, aqui no se inventan partidos.</div>`;
     return;
   }
 
@@ -1642,6 +1706,25 @@ function getBoliviaDateIso(date) {
   }).formatToParts(date);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
+}
+
+function parseIsoDate(dateIso) {
+  const [year, month, day] = dateIso.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day, 12));
+}
+
+function isTodayIso(dateIso) {
+  return dateIso === getBoliviaDateIso(new Date());
+}
+
+function formatShortDate(dateIso) {
+  return new Intl.DateTimeFormat("es-BO", {
+    day: "2-digit",
+    month: "short",
+    timeZone: BOLIVIA_TIME_ZONE,
+  })
+    .format(parseIsoDate(dateIso))
+    .replace(".", "");
 }
 
 function formatBoliviaDate(dateIso) {

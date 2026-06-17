@@ -448,6 +448,66 @@ legend {
   gap: 12px;
 }
 
+.day-picker {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(72px, 1fr));
+  margin: -2px 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow-x: auto;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.day-button {
+  display: grid;
+  min-width: 72px;
+  min-height: 78px;
+  place-items: center;
+  gap: 0;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px 10px;
+  position: relative;
+}
+
+.day-button:last-child {
+  border-right: 0;
+}
+
+.day-button span,
+.day-button small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.day-button strong {
+  font-size: 1.65rem;
+  line-height: 1;
+}
+
+.day-button.active {
+  background: rgba(57, 213, 122, 0.1);
+}
+
+.day-button.active::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: var(--accent);
+}
+
+.day-button.active span,
+.day-button.active strong {
+  color: var(--text);
+}
+
 .match-card,
 .bet-item {
   border: 1px solid var(--line);
