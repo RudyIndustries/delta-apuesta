@@ -9,6 +9,7 @@ Sistema web estatico para registrar apuestas amistosas del Mundial 2026.
 - Borrar el usuario activo desde el panel superior.
 - Consultar partidos del dia con hora de Bolivia.
 - Fuente principal: TheSportsDB API gratuita.
+- Fuente opcional prioritaria: API-Football / API-Sports para marcadores mas completos.
 - Respaldo local para los partidos del Mundial 2026 del 16 de junio.
 - Marcar como no disponibles los partidos que ya empezaron o terminaron.
 - Apostar por local, empate o visitante.
@@ -20,6 +21,7 @@ Sistema web estatico para registrar apuestas amistosas del Mundial 2026.
 - Pozo acumulado de todos los usuarios.
 - Boton grande de resultados en vivo.
 - Pagos proyectados segun el marcador actual.
+- Marcador manual de respaldo cuando la API no entrega goles en vivo.
 - Historial por usuario y total global.
 - Ventana de liquidacion cuando un partido termina.
 - Reparto del pozo acumulado entre quienes acertaron.
@@ -60,6 +62,42 @@ terminara con ese marcador.
 
 Si el marcador en vivo va empatado, la ventana muestra que el pozo se acumularia para el siguiente
 partido.
+
+La API gratuita puede fallar o no traer marcador en tiempo real. Por eso la ventana `Resultados`
+tiene campos para cargar el marcador manualmente. Ese marcador se guarda en Firebase y se usa para
+calcular pagos proyectados y liquidar el partido si la API no trae resultado final.
+
+## API-Football para marcadores
+
+La app intenta usar primero `/api/football`, una funcion serverless de Vercel que consulta
+API-Football / API-Sports. Si no esta configurada o no devuelve partidos, cae automaticamente a
+TheSportsDB y luego al respaldo local.
+
+Para activarla:
+
+1. Crea una cuenta en [API-Football / API-Sports](https://www.api-football.com/).
+2. Copia tu API key.
+3. En Vercel entra a tu proyecto.
+4. Ve a `Settings` > `Environment Variables`.
+5. Agrega:
+
+```text
+APISPORTS_KEY=tu_api_key
+APISPORTS_LEAGUE_ID=1
+APISPORTS_SEASON=2026
+```
+
+6. Guarda y redeploya el proyecto.
+
+`APISPORTS_LEAGUE_ID=1` corresponde a FIFA World Cup en API-Football. Si el proveedor cambia el id
+para 2026, solo actualiza esa variable en Vercel.
+
+Para probar localmente puedes crear un archivo `.env` con las mismas variables o ejecutar PowerShell:
+
+```powershell
+$env:APISPORTS_KEY="tu_api_key"
+npm.cmd run dev
+```
 
 ## Apuestas en vivo
 
@@ -178,7 +216,13 @@ Vercel redeployara automaticamente.
 
 ## API
 
-La app usa:
+La app puede usar:
+
+```text
+/api/football
+```
+
+que internamente llama a API-Football, y como respaldo usa:
 
 ```text
 https://www.thesportsdb.com/api/v1/json/123/eventsday.php?d=YYYY-MM-DD&s=Soccer

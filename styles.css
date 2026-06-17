@@ -835,6 +835,40 @@ legend {
   gap: 10px;
 }
 
+.manual-score-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.manual-score-form label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.manual-score-form input {
+  text-align: center;
+  font-size: 1.2rem;
+  font-weight: 900;
+}
+
+.manual-score-form button {
+  padding: 0 14px;
+  color: #07140d;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 900;
+}
+
 .live-summary div {
   min-width: 0;
   border: 1px solid var(--line);
@@ -883,6 +917,7 @@ legend {
   .result-grid,
   .payout-item,
   .scoreboard,
+  .manual-score-form,
   .live-summary {
     grid-template-columns: 1fr;
   }

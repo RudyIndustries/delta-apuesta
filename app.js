@@ -21,6 +21,7 @@ const STORAGE_KEYS = {
   activeUser: "delta-apuesta-active-user",
   bets: "delta-apuesta-bets",
   settlements: "delta-apuesta-settlements",
+  manualScores: "delta-apuesta-manual-scores",
 };
 
 const FALLBACK_MATCHES = [
@@ -75,6 +76,7 @@ const state = {
   selectedAmount: QUICK_AMOUNTS[0],
   bets: [],
   settlements: [],
+  manualScores: [],
   modalMatchId: "",
   dismissedSettlementPrompts: new Set(),
   liveBettingEnabled: false,
@@ -237,6 +239,7 @@ function loadState() {
   state.users = readJson(STORAGE_KEYS.users, DEFAULT_USERS);
   state.bets = readJson(STORAGE_KEYS.bets, []);
   state.settlements = readJson(STORAGE_KEYS.settlements, []);
+  state.manualScores = readJson(STORAGE_KEYS.manualScores, []);
   const storedActiveUser = localStorage.getItem(STORAGE_KEYS.activeUser);
   state.activeUser = state.users.includes(storedActiveUser) ? storedActiveUser : state.users[0];
 }
@@ -245,6 +248,7 @@ function saveState() {
   localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(state.users));
   localStorage.setItem(STORAGE_KEYS.bets, JSON.stringify(state.bets));
   localStorage.setItem(STORAGE_KEYS.settlements, JSON.stringify(state.settlements));
+  localStorage.setItem(STORAGE_KEYS.manualScores, JSON.stringify(state.manualScores));
   localStorage.setItem(STORAGE_KEYS.activeUser, state.activeUser);
 }
 
@@ -267,9 +271,11 @@ async function initRemoteStore() {
     await seedRemoteUsers();
     await seedRemoteItems("bets", state.bets, (item) => item.id);
     await seedRemoteItems("settlements", state.settlements, (item) => item.matchId);
+    await seedRemoteItems("manualScores", state.manualScores, (item) => item.matchId);
     subscribeToRemoteCollection("users", applyRemoteUsers);
     subscribeToRemoteCollection("bets", applyRemoteBets);
     subscribeToRemoteCollection("settlements", applyRemoteSettlements);
+    subscribeToRemoteCollection("manualScores", applyRemoteManualScores);
   } catch (error) {
     console.warn("Firebase no esta disponible. Usando localStorage.", error);
     state.remoteEnabled = false;
@@ -349,6 +355,11 @@ function applyRemoteSettlements(items) {
     .sort((a, b) => new Date(b.settledAt || 0) - new Date(a.settledAt || 0));
 }
 
+function applyRemoteManualScores(items) {
+  state.manualScores = items.filter((item) => item.matchId);
+  applyManualScoresToMatches();
+}
+
 async function persistUser(name) {
   if (!state.remoteEnabled) {
     saveState();
@@ -407,6 +418,20 @@ async function persistSettlement(settlement) {
   }
 
   await setDoc(remoteDoc("settlements", settlement.matchId), settlement);
+}
+
+async function persistManualScore(score) {
+  const existingIndex = state.manualScores.findIndex((item) => item.matchId === score.matchId);
+  if (existingIndex >= 0) state.manualScores.splice(existingIndex, 1, score);
+  else state.manualScores.unshift(score);
+  applyManualScoresToMatches();
+
+  if (!state.remoteEnabled) {
+    saveState();
+    return;
+  }
+
+  await setDoc(remoteDoc("manualScores", score.matchId), score);
 }
 
 function getUserId(name) {
@@ -471,21 +496,78 @@ function canBetOnMatch(match) {
 async function loadMatches() {
   const fallback = getFallbackMatchesForDate(state.todayIso);
   try {
+    const apiFootballMatches = await fetchApiFootballMatchesForBoliviaDate(state.todayIso);
+    if (apiFootballMatches.length > 0) {
+      state.matches = sortMatches(mergeMatches(apiFootballMatches, fallback));
+      applyManualScoresToMatches();
+      elements.sourceLabel.textContent = `API-Football + ${getStorageLabel()}`;
+      return;
+    }
+
     const apiMatches = await fetchSportsDbMatchesForBoliviaDate(state.todayIso);
     const merged = mergeMatches(apiMatches, fallback);
     state.matches = sortMatches(merged);
+    applyManualScoresToMatches();
     elements.sourceLabel.textContent =
       apiMatches.length > 0
         ? `TheSportsDB + ${getStorageLabel()}`
         : `Respaldo local + ${getStorageLabel()}`;
   } catch (error) {
     state.matches = sortMatches(fallback);
+    applyManualScoresToMatches();
     elements.sourceLabel.textContent = `Respaldo local + ${getStorageLabel()}`;
   }
 }
 
 function getStorageLabel() {
   return state.remoteEnabled ? "Firebase" : "localStorage";
+}
+
+async function fetchApiFootballMatchesForBoliviaDate(dateIso) {
+  const apiDates = [dateIso, addDaysIso(dateIso, 1)];
+  const batches = await Promise.all(apiDates.map(fetchApiFootballMatches));
+  return batches
+    .flat()
+    .filter((match) => getBoliviaDateIso(new Date(match.kickoffUtc)) === dateIso);
+}
+
+async function fetchApiFootballMatches(dateIso) {
+  const response = await fetch(`/api/football?date=${encodeURIComponent(dateIso)}`, {
+    cache: "no-store",
+  });
+  if (!response.ok) return [];
+
+  const data = await response.json();
+  if (!data.configured || !Array.isArray(data.events)) return [];
+  return data.events.map(mapApiFootballEvent).filter(Boolean);
+}
+
+function mapApiFootballEvent(event) {
+  const fixture = event.fixture || {};
+  const teams = event.teams || {};
+  const league = event.league || {};
+  const goals = event.goals || {};
+  const status = fixture.status || {};
+  const homeTeam = teams.home?.name || "Local";
+  const awayTeam = teams.away?.name || "Visitante";
+  const kickoffUtc = fixture.date;
+  if (!kickoffUtc) return null;
+
+  return {
+    id: fixture.id ? `api-football-${fixture.id}` : slugify(`${kickoffUtc}-${homeTeam}-${awayTeam}`),
+    date: kickoffUtc.slice(0, 10),
+    kickoffUtc,
+    homeTeam,
+    awayTeam,
+    group: league.round || league.name || "FIFA World Cup 2026",
+    venue: fixture.venue?.name || "Sede por confirmar",
+    status: [status.long, status.short, status.elapsed ? `${status.elapsed}'` : ""]
+      .filter(Boolean)
+      .join(" "),
+    homeScore: toScore(goals.home),
+    awayScore: toScore(goals.away),
+    source: "API-Football",
+  };
 }
 
 async function fetchSportsDbMatchesForBoliviaDate(dateIso) {
@@ -582,6 +664,27 @@ function mergeMatches(apiMatches, fallbackMatches) {
     });
   });
   return [...map.values()];
+}
+
+function applyManualScoresToMatches() {
+  state.matches = state.matches.map((match) => {
+    const manualScore = getManualScore(match.id);
+    if (!manualScore) return match;
+
+    return {
+      ...match,
+      homeScore: manualScore.homeScore,
+      awayScore: manualScore.awayScore,
+      status: manualScore.status || match.status,
+      source: match.source.includes("Marcador manual")
+        ? match.source
+        : `${match.source} + Marcador manual`,
+    };
+  });
+}
+
+function getManualScore(matchId) {
+  return state.manualScores.find((score) => score.matchId === matchId);
 }
 
 function sortMatches(matches) {
@@ -1113,6 +1216,9 @@ function renderResultsModal() {
   }
 
   elements.resultsBody.innerHTML = liveMatches.map(renderLiveResultBlock).join("");
+  elements.resultsBody.querySelectorAll("[data-save-score]").forEach((button) => {
+    button.addEventListener("click", () => saveManualScoreFromResults(button.dataset.saveScore));
+  });
 }
 
 function renderLiveResultBlock(match) {
@@ -1144,6 +1250,18 @@ function renderLiveResultBlock(match) {
         </div>
       </div>
 
+      <div class="manual-score-form">
+        <label>
+          <span>${escapeHtml(match.homeTeam)}</span>
+          <input type="number" min="0" step="1" value="${homeScore}" data-score-home="${escapeHtml(match.id)}" />
+        </label>
+        <label>
+          <span>${escapeHtml(match.awayTeam)}</span>
+          <input type="number" min="0" step="1" value="${awayScore}" data-score-away="${escapeHtml(match.id)}" />
+        </label>
+        <button type="button" data-save-score="${escapeHtml(match.id)}">Guardar marcador</button>
+      </div>
+
       <div class="live-summary">
         <div>
           <span>${escapeHtml(leaderLabel)}</span>
@@ -1167,6 +1285,29 @@ function renderLiveResultBlock(match) {
       ${renderProjectionPayouts(projection)}
     </section>
   `;
+}
+
+async function saveManualScoreFromResults(matchId) {
+  const match = state.matches.find((item) => item.id === matchId);
+  const homeInput = elements.resultsBody.querySelector(`[data-score-home="${cssEscape(matchId)}"]`);
+  const awayInput = elements.resultsBody.querySelector(`[data-score-away="${cssEscape(matchId)}"]`);
+  const homeScore = Math.max(0, Math.round(Number(homeInput?.value ?? 0)));
+  const awayScore = Math.max(0, Math.round(Number(awayInput?.value ?? 0)));
+
+  if (!match || !Number.isFinite(homeScore) || !Number.isFinite(awayScore)) return;
+
+  await persistManualScore({
+    matchId,
+    homeTeam: match.homeTeam,
+    awayTeam: match.awayTeam,
+    homeScore,
+    awayScore,
+    updatedAt: new Date().toISOString(),
+    updatedBy: state.activeUser,
+  });
+
+  renderAll();
+  renderResultsModal();
 }
 
 function renderProjectionNotice(projection, resultChoice) {
@@ -1485,4 +1626,9 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function cssEscape(value) {
+  if (window.CSS?.escape) return CSS.escape(value);
+  return String(value).replace(/"/g, '\\"');
 }

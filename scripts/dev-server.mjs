@@ -15,6 +15,12 @@ const contentTypes = {
 
 createServer(async (request, response) => {
   const url = new URL(request.url || "/", `http://${host}:${port}`);
+
+  if (url.pathname === "/api/football") {
+    await handleApiFootball(url, response);
+    return;
+  }
+
   const pathname = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
   const filePath = resolve(join(root, pathname));
 
@@ -37,3 +43,49 @@ createServer(async (request, response) => {
 }).listen(port, host, () => {
   console.log(`Delta Apuesta listo en http://${host}:${port}`);
 });
+
+async function handleApiFootball(url, response) {
+  const apiKey = process.env.APISPORTS_KEY;
+  const date = url.searchParams.get("date");
+  const league = process.env.APISPORTS_LEAGUE_ID || "1";
+  const season = process.env.APISPORTS_SEASON || "2026";
+
+  if (!apiKey) {
+    sendJson(response, 200, { configured: false, events: [] });
+    return;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ""))) {
+    sendJson(response, 400, { configured: true, error: "Fecha invalida", events: [] });
+    return;
+  }
+
+  try {
+    const apiUrl = new URL("https://v3.football.api-sports.io/fixtures");
+    apiUrl.searchParams.set("date", date);
+    apiUrl.searchParams.set("league", league);
+    apiUrl.searchParams.set("season", season);
+
+    const apiResponse = await fetch(apiUrl, {
+      headers: { "x-apisports-key": apiKey },
+    });
+    const data = await apiResponse.json();
+
+    sendJson(response, apiResponse.ok ? 200 : apiResponse.status, {
+      configured: true,
+      events: Array.isArray(data.response) ? data.response : [],
+      error: apiResponse.ok ? undefined : data?.message || "No se pudo consultar API-Football",
+    });
+  } catch {
+    sendJson(response, 500, {
+      configured: true,
+      error: "Error consultando API-Football",
+      events: [],
+    });
+  }
+}
+
+function sendJson(response, status, body) {
+  response.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  response.end(JSON.stringify(body));
+}
