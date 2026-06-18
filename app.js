@@ -69,7 +69,6 @@ const elements = {
   dayPicker: document.querySelector("#dayPicker"),
   matchesList: document.querySelector("#matchesList"),
   betsList: document.querySelector("#betsList"),
-  clearMyBetsButton: document.querySelector("#clearMyBetsButton"),
   openHistoryButton: document.querySelector("#openHistoryButton"),
   myBetCount: document.querySelector("#myBetCount"),
   myBetTotal: document.querySelector("#myBetTotal"),
@@ -145,25 +144,6 @@ function bindEvents() {
     const value = Number(elements.customAmount.value);
     state.selectedAmount = Number.isFinite(value) ? value : 0;
     renderAmounts();
-  });
-
-  elements.clearMyBetsButton.addEventListener("click", async () => {
-    if (!state.remoteEnabled) {
-      window.alert("Firebase no esta conectado. No se pueden borrar apuestas.");
-      return;
-    }
-    const removableBetIds = state.bets
-      .filter((bet) => bet.user === state.activeUser && !getSettlement(bet.matchId))
-      .map((bet) => bet.id);
-    try {
-      await Promise.all(removableBetIds.map((id) => deleteDoc(remoteDoc("bets", id))));
-      state.bets = state.bets.filter(
-        (bet) => bet.user !== state.activeUser || getSettlement(bet.matchId),
-      );
-      renderAll();
-    } catch (error) {
-      window.alert("No se pudieron borrar las apuestas en Firebase.");
-    }
   });
 
   elements.openResultsButton.addEventListener("click", openResultsModal);
@@ -258,7 +238,7 @@ function applyRemoteUsers(items) {
 }
 
 function applyRemoteBets(items) {
-  state.bets = items
+  state.bets = dedupeBets(items)
     .filter((item) => item.id && item.user && item.matchId)
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 }
@@ -297,12 +277,28 @@ async function persistBet(bet) {
   await setDoc(remoteDoc("bets", bet.id), bet);
 }
 
-async function deleteBet(id) {
-  ensureFirebaseReady();
+function dedupeBets(items) {
+  const byLogicalBet = new Map();
+  items.forEach((item) => {
+    if (!item.id || !item.user || !item.matchId) return;
+    const key = getBetLogicalKey(item);
+    const current = byLogicalBet.get(key);
+    if (!current || new Date(item.createdAt || 0) >= new Date(current.createdAt || 0)) {
+      byLogicalBet.set(key, item);
+    }
+  });
+  return [...byLogicalBet.values()];
+}
 
-  await deleteDoc(remoteDoc("bets", id));
-  state.bets = state.bets.filter((bet) => bet.id !== id);
-  renderAll();
+function upsertBetInState(bet) {
+  const key = getBetLogicalKey(bet);
+  const nextBets = state.bets.filter((item) => item.id !== bet.id && getBetLogicalKey(item) !== key);
+  nextBets.unshift(bet);
+  state.bets = dedupeBets(nextBets).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+}
+
+function getBetLogicalKey(bet) {
+  return `${normalize(bet.user)}::${bet.matchId}`;
 }
 
 async function persistSettlement(settlement) {
@@ -564,7 +560,7 @@ function renderShell() {
   elements.activeUserLabel.textContent = state.activeUser || "Sin usuario";
   elements.ticketUserLabel.textContent = state.activeUser || "Sin usuario";
   elements.ticketPoolLabel.textContent = formatCurrency(getCurrentPot());
-  elements.ticketBetCountLabel.textContent = state.bets.length;
+  elements.ticketBetCountLabel.textContent = getVisibleBets().length;
   elements.liveBetToggle.checked = state.liveBettingEnabled;
   elements.liveBetStatus.textContent = state.liveBettingEnabled
     ? "Habilitado con admin"
@@ -918,8 +914,7 @@ async function placeBet() {
 
   try {
     await persistBet(bet);
-    if (existingIndex >= 0) state.bets.splice(existingIndex, 1, bet);
-    else state.bets.unshift(bet);
+    upsertBetInState(bet);
     showFormMessage(existingIndex >= 0 ? "Apuesta actualizada." : "Apuesta registrada.");
     renderAll();
     setTimeout(closeBetModal, 350);
@@ -934,43 +929,32 @@ function showFormMessage(message, isError = false) {
 }
 
 function renderBets() {
-  const total = getCurrentPot();
-  const apostadores = new Set(state.bets.map((bet) => bet.user)).size;
+  const visibleBets = getVisibleBets();
+  const total = getVisiblePot();
+  const apostadores = new Set(visibleBets.map((bet) => bet.user)).size;
 
-  elements.myBetCount.textContent = state.bets.length;
+  elements.myBetCount.textContent = visibleBets.length;
   elements.myBetTotal.textContent = formatCurrency(total);
   elements.globalBetCount.textContent = apostadores;
 
-  if (state.bets.length === 0) {
-    elements.betsList.innerHTML = '<div class="empty-state">Todavia no hay apuestas registradas.</div>';
+  if (visibleBets.length === 0) {
+    elements.betsList.innerHTML =
+      `<div class="empty-state">Todavia no hay apuestas registradas para ${escapeHtml(
+        formatShortDate(state.todayIso),
+      )}.</div>`;
     return;
   }
 
-  elements.betsList.innerHTML = state.bets.map(renderBetItem).join("");
-  elements.betsList.querySelectorAll("[data-remove-bet]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      try {
-        await deleteBet(button.dataset.removeBet);
-      } catch (error) {
-        window.alert(error.message);
-      }
-    });
-  });
+  elements.betsList.innerHTML = visibleBets.map(renderBetItem).join("");
 }
 
 function renderBetItem(bet) {
   const settlement = getSettlement(bet.matchId);
   const payout = settlement?.payouts.find((item) => item.user === bet.user);
-  const canRemove = bet.user === state.activeUser && !settlement;
   return `
     <article class="bet-item">
       <header>
         <h3>${escapeHtml(bet.user)}</h3>
-        ${
-          canRemove
-            ? `<button class="remove-bet" type="button" data-remove-bet="${escapeHtml(bet.id)}">Quitar</button>`
-            : ""
-        }
       </header>
       <p><strong>${escapeHtml(bet.matchLabel)}</strong></p>
       <p>Apuesta por <strong>${escapeHtml(bet.selection)}</strong> &middot; <strong>${formatCurrency(
@@ -1530,8 +1514,26 @@ function getOpenBets() {
   return state.bets.filter((bet) => !getSettlement(bet.matchId));
 }
 
+function getVisibleBets() {
+  return state.bets.filter(isBetForSelectedDay);
+}
+
+function getVisibleOpenBets() {
+  return getOpenBets().filter(isBetForSelectedDay);
+}
+
+function isBetForSelectedDay(bet) {
+  const sourceDate = bet.kickoffUtc || bet.createdAt;
+  const date = new Date(sourceDate);
+  return !Number.isNaN(date.getTime()) && getBoliviaDateIso(date) === state.todayIso;
+}
+
 function getCurrentPot() {
-  return getTotalPool(getOpenBets()) + getAvailableCarryover();
+  return getTotalPool(getVisibleOpenBets()) + getAvailableCarryover();
+}
+
+function getVisiblePot() {
+  return getTotalPool(getVisibleOpenBets()) + getAvailableCarryover();
 }
 
 function getAvailableCarryover() {

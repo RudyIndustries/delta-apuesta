@@ -694,12 +694,6 @@ legend {
   color: var(--text);
 }
 
-.remove-bet {
-  min-height: 32px;
-  padding: 0 9px;
-  color: var(--danger);
-}
-
 .win-text strong {
   color: var(--accent);
 }
