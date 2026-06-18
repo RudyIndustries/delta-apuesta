@@ -255,6 +255,46 @@ h3 {
   line-height: 1.5;
 }
 
+.api-debug {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  text-align: left;
+}
+
+.api-debug dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.api-debug dl > div {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 6px;
+}
+
+.api-debug dt {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.api-debug dd {
+  margin: 0;
+  color: var(--text);
+  font-weight: 900;
+  text-align: right;
+}
+
+.api-debug ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+}
+
 .ticket-summary {
   display: grid;
   gap: 10px;

@@ -52,7 +52,14 @@ async function handleApiFootball(url, response) {
   const timezone = "America/La_Paz";
 
   if (!apiKey) {
-    sendJson(response, 200, { configured: false, events: [] });
+    sendJson(response, 200, {
+      configured: false,
+      events: [],
+      diagnostics: {
+        reason: "missing-api-key",
+        message: "Falta APISPORTS_KEY en Vercel.",
+      },
+    });
     return;
   }
 
@@ -62,11 +69,18 @@ async function handleApiFootball(url, response) {
   }
 
   try {
-    const leagueRequests = leagueIds.map((league) =>
-      fetchFixtures({ apiKey, date, league, season, timezone, withLeague: true }),
+    const queryConfigs = [
+      ...leagueIds.map((league) => ({ league, season, timezone, withLeague: true })),
+      { season, timezone, withLeague: false },
+    ];
+    const results = await Promise.all(
+      queryConfigs.map((config) =>
+        fetchFixtures({ apiKey, date, ...config }).then((result) => ({
+          ...result,
+          query: getQueryLabel(config),
+        })),
+      ),
     );
-    const dateRequest = fetchFixtures({ apiKey, date, season, timezone, withLeague: false });
-    const results = await Promise.all([...leagueRequests, dateRequest]);
     const okResults = results.filter((item) => item.ok);
 
     if (okResults.length === 0) {
@@ -75,13 +89,13 @@ async function handleApiFootball(url, response) {
         configured: true,
         error: firstError.error || "No se pudo consultar API-Football",
         events: [],
+        diagnostics: buildDiagnostics({ date, timezone, season, leagueIds, results, events: [] }),
       });
       return;
     }
 
-    const events = uniqueFixtures(
-      okResults.flatMap((result) => result.events).filter(isWorldCupFixture),
-    );
+    const rawEvents = uniqueFixtures(okResults.flatMap((result) => result.events));
+    const events = uniqueFixtures(rawEvents.filter(isWorldCupFixture));
 
     sendJson(response, 200, {
       configured: true,
@@ -90,12 +104,17 @@ async function handleApiFootball(url, response) {
       date,
       leagueIds,
       events,
+      diagnostics: buildDiagnostics({ date, timezone, season, leagueIds, results, events, rawEvents }),
     });
   } catch {
     sendJson(response, 500, {
       configured: true,
       error: "Error consultando API-Football",
       events: [],
+      diagnostics: {
+        reason: "server-error",
+        message: "La funcion local fallo consultando API-Football.",
+      },
     });
   }
 }
@@ -128,6 +147,39 @@ async function fetchFixtures({ apiKey, date, league, season, timezone, withLeagu
     error: data?.message || data?.errors,
     events: Array.isArray(data.response) ? data.response : [],
   };
+}
+
+function getQueryLabel(config) {
+  return config.withLeague ? `league=${config.league}&season=${config.season}` : "date-only";
+}
+
+function buildDiagnostics({ date, timezone, season, leagueIds, results, events, rawEvents = [] }) {
+  const totalRaw = rawEvents.length;
+  const totalFiltered = events.length;
+  return {
+    reason: totalFiltered > 0 ? "ok" : totalRaw > 0 ? "filtered-empty" : "api-empty",
+    date,
+    timezone,
+    season,
+    leagueIds,
+    rawCount: totalRaw,
+    filteredCount: totalFiltered,
+    queries: results.map((result) => ({
+      query: result.query,
+      ok: result.ok,
+      status: result.status,
+      count: result.events.length,
+      error: result.error || "",
+      leagues: summarizeLeagues(result.events),
+    })),
+  };
+}
+
+function summarizeLeagues(events) {
+  return [...new Set(events.map((event) => {
+    const league = event?.league || {};
+    return [league.id, league.name, league.country].filter(Boolean).join(" - ");
+  }).filter(Boolean))].slice(0, 6);
 }
 
 function isWorldCupFixture(event) {

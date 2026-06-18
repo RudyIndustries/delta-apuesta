@@ -31,6 +31,7 @@ const state = {
   manualScores: [],
   modalMatchId: "",
   dismissedSettlementPrompts: new Set(),
+  apiDiagnostics: null,
   liveBettingEnabled: false,
   db: null,
   remoteEnabled: false,
@@ -406,6 +407,10 @@ async function loadMatches() {
         : `Sin partidos API + ${getStorageLabel()}`;
   } catch (error) {
     state.matches = [];
+    state.apiDiagnostics = {
+      reason: "frontend-error",
+      message: "La app no pudo leer la respuesta de /api/football.",
+    };
     applyManualScoresToMatches();
     elements.sourceLabel.textContent = `Error API + ${getStorageLabel()}`;
   }
@@ -424,9 +429,16 @@ async function fetchApiFootballMatches(dateIso) {
   const response = await fetch(`/api/football?date=${encodeURIComponent(dateIso)}`, {
     cache: "no-store",
   });
-  if (!response.ok) return [];
+  if (!response.ok) {
+    state.apiDiagnostics = {
+      reason: "http-error",
+      message: `/api/football respondio ${response.status}.`,
+    };
+    return [];
+  }
 
   const data = await response.json();
+  state.apiDiagnostics = data.diagnostics || null;
   if (!data.configured || !Array.isArray(data.events)) return [];
   return uniqueMatches(data.events.map(mapApiFootballEvent).filter(Boolean));
 }
@@ -624,7 +636,8 @@ function renderMatches() {
     elements.matchesList.innerHTML =
       `<div class="empty-state">No hay partidos del Mundial 2026 registrados para ${escapeHtml(
         formatShortDate(state.todayIso),
-      )}. Si API-Football no devuelve datos para esa fecha, aqui no se inventan partidos.</div>`;
+      )}. Si API-Football no devuelve datos para esa fecha, aqui no se inventan partidos.</div>
+      ${renderApiDiagnostics()}`;
     return;
   }
 
@@ -644,6 +657,67 @@ function renderMatches() {
       openSettlementModal(button.dataset.openSettlement);
     });
   });
+}
+
+function renderApiDiagnostics() {
+  const diagnostics = state.apiDiagnostics;
+  if (!diagnostics) return "";
+
+  if (diagnostics.message) {
+    return `<div class="empty-state api-debug"><strong>Diagnostico API:</strong> ${escapeHtml(
+      diagnostics.message,
+    )}</div>`;
+  }
+
+  const rows = [
+    ["Motivo", getDiagnosticReasonLabel(diagnostics.reason)],
+    ["Fecha consultada", diagnostics.date || state.todayIso],
+    ["Zona horaria", diagnostics.timezone || BOLIVIA_TIME_ZONE],
+    ["Temporada", diagnostics.season || "2026"],
+    ["Ligas", Array.isArray(diagnostics.leagueIds) ? diagnostics.leagueIds.join(", ") : "1"],
+    ["Partidos recibidos", diagnostics.rawCount ?? 0],
+    ["Partidos Mundial filtrados", diagnostics.filteredCount ?? 0],
+  ];
+
+  const queryHtml = Array.isArray(diagnostics.queries)
+    ? diagnostics.queries
+        .map(
+          (query) => `
+            <li>
+              ${escapeHtml(query.query)}: ${query.count || 0} eventos
+              ${query.error ? ` · ${escapeHtml(String(query.error))}` : ""}
+              ${renderDiagnosticLeagues(query.leagues)}
+            </li>
+          `,
+        )
+        .join("")
+    : "";
+
+  return `
+    <div class="empty-state api-debug">
+      <strong>Diagnostico API-Football</strong>
+      <dl>
+        ${rows
+          .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`)
+          .join("")}
+      </dl>
+      ${queryHtml ? `<ul>${queryHtml}</ul>` : ""}
+    </div>
+  `;
+}
+
+function renderDiagnosticLeagues(leagues) {
+  if (!Array.isArray(leagues) || leagues.length === 0) return "";
+  return `<br><small>Ligas: ${escapeHtml(leagues.join(" | "))}</small>`;
+}
+
+function getDiagnosticReasonLabel(reason) {
+  const labels = {
+    "api-empty": "API-Football respondio 0 eventos.",
+    "filtered-empty": "La API devolvio eventos, pero ninguno fue detectado como Mundial.",
+    ok: "API-Football respondio partidos del Mundial.",
+  };
+  return labels[reason] || reason || "Sin detalle";
 }
 
 function renderMatchCard(match) {
