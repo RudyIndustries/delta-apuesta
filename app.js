@@ -70,6 +70,7 @@ const elements = {
   matchesList: document.querySelector("#matchesList"),
   betsList: document.querySelector("#betsList"),
   openHistoryButton: document.querySelector("#openHistoryButton"),
+  refreshDailyBetsButton: document.querySelector("#refreshDailyBetsButton"),
   myBetCount: document.querySelector("#myBetCount"),
   myBetTotal: document.querySelector("#myBetTotal"),
   globalBetCount: document.querySelector("#globalBetCount"),
@@ -151,6 +152,7 @@ function bindEvents() {
   elements.closeResultsFooterButton.addEventListener("click", closeResultsModal);
   elements.refreshResultsButton.addEventListener("click", refreshResultsModal);
   elements.openHistoryButton.addEventListener("click", openHistoryModal);
+  elements.refreshDailyBetsButton.addEventListener("click", refreshDailyBets);
   elements.closeSettlementButton.addEventListener("click", closeSettlementModal);
   elements.closeHistoryButton.addEventListener("click", closeHistoryModal);
   elements.closeHistoryFooterButton.addEventListener("click", closeHistoryModal);
@@ -238,7 +240,7 @@ function applyRemoteUsers(items) {
 }
 
 function applyRemoteBets(items) {
-  state.bets = dedupeBets(items)
+  state.bets = dedupeBets(items.map(normalizeBetRecord))
     .filter((item) => item.id && item.user && item.matchId)
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 }
@@ -906,6 +908,7 @@ async function placeBet() {
     user: state.activeUser,
     matchId: match.id,
     matchLabel: `${match.homeTeam} vs ${match.awayTeam}`,
+    matchDate: getMatchDate(match),
     kickoffUtc: match.kickoffUtc,
     selection: state.selectedChoice,
     amount,
@@ -972,6 +975,65 @@ function renderBetPayoutLine(payout) {
   return `<p class="${className}"><strong>${status}</strong> &middot; Le corresponde <strong>${formatCurrency(
     payout.payout,
   )}</strong></p>`;
+}
+
+async function refreshDailyBets() {
+  try {
+    ensureFirebaseReady();
+    elements.refreshDailyBetsButton.disabled = true;
+    elements.refreshDailyBetsButton.textContent = "Actualizando...";
+
+    const snapshot = await getDocs(remoteCollection("bets"));
+    const remoteBets = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    const { keptBets, duplicateIds, backfilledBets } = prepareBetCleanup(remoteBets);
+
+    await Promise.all([
+      ...duplicateIds.map((id) => deleteDoc(remoteDoc("bets", id))),
+      ...backfilledBets.map((bet) => setDoc(remoteDoc("bets", bet.id), bet, { merge: true })),
+    ]);
+
+    state.bets = keptBets.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    renderAll();
+    window.alert(
+      `Apuestas actualizadas. Duplicados borrados: ${duplicateIds.length}. Registros corregidos: ${backfilledBets.length}.`,
+    );
+  } catch (error) {
+    window.alert(error.message || "No se pudieron actualizar las apuestas.");
+  } finally {
+    elements.refreshDailyBetsButton.disabled = false;
+    elements.refreshDailyBetsButton.textContent = "Actualizar apuestas";
+  }
+}
+
+function prepareBetCleanup(bets) {
+  const latestByKey = new Map();
+
+  bets.forEach((bet) => {
+    if (!bet.id || !bet.user || !bet.matchId) return;
+    const normalizedBet = normalizeBetRecord(bet);
+    const key = getBetLogicalKey(normalizedBet);
+    const current = latestByKey.get(key);
+    if (!current || new Date(normalizedBet.createdAt || 0) >= new Date(current.createdAt || 0)) {
+      latestByKey.set(key, normalizedBet);
+    }
+  });
+
+  const keepIds = new Set([...latestByKey.values()].map((bet) => bet.id));
+  const duplicateIds = bets
+    .filter((bet) => bet.id && bet.user && bet.matchId && !keepIds.has(bet.id))
+    .map((bet) => bet.id);
+  const keptBets = [...latestByKey.values()];
+  const backfilledBets = keptBets.filter((bet) => {
+    const original = bets.find((item) => item.id === bet.id);
+    return original && bet.matchDate && original.matchDate !== bet.matchDate;
+  });
+
+  return { keptBets, duplicateIds, backfilledBets };
+}
+
+function normalizeBetRecord(bet) {
+  const matchDate = getBetMatchDate(bet);
+  return matchDate ? { ...bet, matchDate } : { ...bet };
 }
 
 function getMatchLifecycle(match) {
@@ -1446,6 +1508,7 @@ function createSettlement(match, resultChoice, source) {
     awayTeam: match.awayTeam,
     homeScore: hasFinalScore(match) ? match.homeScore : undefined,
     awayScore: hasFinalScore(match) ? match.awayScore : undefined,
+    matchDate: getMatchDate(match),
     kickoffUtc: match.kickoffUtc,
     result: resultChoice,
     resultLabel: getResultLabel(match, resultChoice),
@@ -1506,6 +1569,12 @@ function getBetsForMatch(matchId) {
   return state.bets.filter((bet) => bet.matchId === matchId);
 }
 
+function getMatchDate(match) {
+  if (isIsoDate(match?.date)) return match.date;
+  if (match?.kickoffUtc) return toBoliviaIsoDate(match.kickoffUtc);
+  return state.todayIso;
+}
+
 function getSettlement(matchId) {
   return state.settlements.find((settlement) => settlement.matchId === matchId);
 }
@@ -1523,9 +1592,21 @@ function getVisibleOpenBets() {
 }
 
 function isBetForSelectedDay(bet) {
-  const sourceDate = bet.kickoffUtc || bet.createdAt;
-  const date = new Date(sourceDate);
-  return !Number.isNaN(date.getTime()) && getBoliviaDateIso(date) === state.todayIso;
+  return getBetMatchDate(bet) === state.todayIso;
+}
+
+function getBetMatchDate(bet) {
+  if (isIsoDate(bet.matchDate)) return bet.matchDate;
+
+  const loadedMatch = state.matches.find((match) => match.id === bet.matchId);
+  if (loadedMatch) return getMatchDate(loadedMatch);
+
+  const settlement = getSettlement(bet.matchId);
+  if (isIsoDate(settlement?.matchDate)) return settlement.matchDate;
+  if (settlement?.kickoffUtc) return toBoliviaIsoDate(settlement.kickoffUtc);
+
+  if (bet.kickoffUtc) return toBoliviaIsoDate(bet.kickoffUtc);
+  return "";
 }
 
 function getCurrentPot() {
@@ -1544,6 +1625,15 @@ function getAvailableCarryover() {
 
 function getTotalPool(bets) {
   return bets.reduce((sum, bet) => sum + Number(bet.amount || 0), 0);
+}
+
+function isIsoDate(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+}
+
+function toBoliviaIsoDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : getBoliviaDateIso(date);
 }
 
 function getResultOptions(match) {
