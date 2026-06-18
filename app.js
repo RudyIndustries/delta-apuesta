@@ -70,7 +70,6 @@ const elements = {
   matchesList: document.querySelector("#matchesList"),
   betsList: document.querySelector("#betsList"),
   openHistoryButton: document.querySelector("#openHistoryButton"),
-  refreshDailyBetsButton: document.querySelector("#refreshDailyBetsButton"),
   myBetCount: document.querySelector("#myBetCount"),
   myBetTotal: document.querySelector("#myBetTotal"),
   globalBetCount: document.querySelector("#globalBetCount"),
@@ -152,7 +151,6 @@ function bindEvents() {
   elements.closeResultsFooterButton.addEventListener("click", closeResultsModal);
   elements.refreshResultsButton.addEventListener("click", refreshResultsModal);
   elements.openHistoryButton.addEventListener("click", openHistoryModal);
-  elements.refreshDailyBetsButton.addEventListener("click", refreshDailyBets);
   elements.closeSettlementButton.addEventListener("click", closeSettlementModal);
   elements.closeHistoryButton.addEventListener("click", closeHistoryModal);
   elements.closeHistoryFooterButton.addEventListener("click", closeHistoryModal);
@@ -975,60 +973,6 @@ function renderBetPayoutLine(payout) {
   return `<p class="${className}"><strong>${status}</strong> &middot; Le corresponde <strong>${formatCurrency(
     payout.payout,
   )}</strong></p>`;
-}
-
-async function refreshDailyBets() {
-  try {
-    ensureFirebaseReady();
-    elements.refreshDailyBetsButton.disabled = true;
-    elements.refreshDailyBetsButton.textContent = "Actualizando...";
-
-    const snapshot = await getDocs(remoteCollection("bets"));
-    const remoteBets = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-    const { keptBets, duplicateIds, backfilledBets } = prepareBetCleanup(remoteBets);
-
-    await Promise.all([
-      ...duplicateIds.map((id) => deleteDoc(remoteDoc("bets", id))),
-      ...backfilledBets.map((bet) => setDoc(remoteDoc("bets", bet.id), bet, { merge: true })),
-    ]);
-
-    state.bets = keptBets.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-    renderAll();
-    window.alert(
-      `Apuestas actualizadas. Duplicados borrados: ${duplicateIds.length}. Registros corregidos: ${backfilledBets.length}.`,
-    );
-  } catch (error) {
-    window.alert(error.message || "No se pudieron actualizar las apuestas.");
-  } finally {
-    elements.refreshDailyBetsButton.disabled = false;
-    elements.refreshDailyBetsButton.textContent = "Actualizar apuestas";
-  }
-}
-
-function prepareBetCleanup(bets) {
-  const latestByKey = new Map();
-
-  bets.forEach((bet) => {
-    if (!bet.id || !bet.user || !bet.matchId) return;
-    const normalizedBet = normalizeBetRecord(bet);
-    const key = getBetLogicalKey(normalizedBet);
-    const current = latestByKey.get(key);
-    if (!current || new Date(normalizedBet.createdAt || 0) >= new Date(current.createdAt || 0)) {
-      latestByKey.set(key, normalizedBet);
-    }
-  });
-
-  const keepIds = new Set([...latestByKey.values()].map((bet) => bet.id));
-  const duplicateIds = bets
-    .filter((bet) => bet.id && bet.user && bet.matchId && !keepIds.has(bet.id))
-    .map((bet) => bet.id);
-  const keptBets = [...latestByKey.values()];
-  const backfilledBets = keptBets.filter((bet) => {
-    const original = bets.find((item) => item.id === bet.id);
-    return original && bet.matchDate && original.matchDate !== bet.matchDate;
-  });
-
-  return { keptBets, duplicateIds, backfilledBets };
 }
 
 function normalizeBetRecord(bet) {
