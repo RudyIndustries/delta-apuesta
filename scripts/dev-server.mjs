@@ -49,7 +49,7 @@ async function handleApiFootball(url, response) {
   const date = url.searchParams.get("date");
   const leagueIds = getLeagueIds();
   const season = process.env.APISPORTS_SEASON || "2026";
-  const timezone = process.env.APISPORTS_TIMEZONE || "America/La_Paz";
+  const timezone = "America/La_Paz";
 
   if (!apiKey) {
     sendJson(response, 200, { configured: false, events: [] });
@@ -110,8 +110,7 @@ function getLeagueIds() {
 
 async function fetchFixtures({ apiKey, date, league, season, timezone, withLeague }) {
   const apiUrl = new URL("https://v3.football.api-sports.io/fixtures");
-  apiUrl.searchParams.set("from", date);
-  apiUrl.searchParams.set("to", date);
+  apiUrl.searchParams.set("date", date);
   apiUrl.searchParams.set("timezone", timezone);
   if (withLeague) {
     apiUrl.searchParams.set("league", league);

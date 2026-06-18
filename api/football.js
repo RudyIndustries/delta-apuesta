@@ -6,7 +6,7 @@ export default async function handler(request, response) {
   const apiKey = process.env.APISPORTS_KEY;
   const leagueIds = getLeagueIds();
   const season = process.env.APISPORTS_SEASON || "2026";
-  const timezone = process.env.APISPORTS_TIMEZONE || DEFAULT_TIMEZONE;
+  const timezone = DEFAULT_TIMEZONE;
   const { date } = request.query || {};
 
   if (!apiKey) {
@@ -68,8 +68,7 @@ function getLeagueIds() {
 
 async function fetchFixtures({ apiKey, date, league, season, timezone, withLeague }) {
   const url = new URL(`${API_FOOTBALL_BASE_URL}/fixtures`);
-  url.searchParams.set("from", date);
-  url.searchParams.set("to", date);
+  url.searchParams.set("date", date);
   url.searchParams.set("timezone", timezone);
   if (withLeague) {
     url.searchParams.set("league", league);

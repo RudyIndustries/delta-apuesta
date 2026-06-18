@@ -398,19 +398,11 @@ function canBetOnMatch(match) {
 async function loadMatches() {
   try {
     const apiFootballMatches = await fetchApiFootballMatchesForBoliviaDate(state.todayIso);
-    if (apiFootballMatches.length > 0) {
-      state.matches = sortMatches(apiFootballMatches);
-      applyManualScoresToMatches();
-      elements.sourceLabel.textContent = `API-Football (${apiFootballMatches.length}) + ${getStorageLabel()}`;
-      return;
-    }
-
-    const apiMatches = await fetchSportsDbMatchesForBoliviaDate(state.todayIso);
-    state.matches = sortMatches(apiMatches);
+    state.matches = sortMatches(apiFootballMatches);
     applyManualScoresToMatches();
     elements.sourceLabel.textContent =
-      apiMatches.length > 0
-        ? `TheSportsDB (${apiMatches.length}) + ${getStorageLabel()}`
+      apiFootballMatches.length > 0
+        ? `API-Football (${apiFootballMatches.length}) + ${getStorageLabel()}`
         : `Sin partidos API + ${getStorageLabel()}`;
   } catch (error) {
     state.matches = [];
@@ -450,12 +442,14 @@ function mapApiFootballEvent(event) {
   const kickoffUtc = getApiFootballKickoffIso(fixture);
   if (!kickoffUtc) return null;
   const kickoffDate = new Date(kickoffUtc);
+  const kickoffLocal = fixture.date || "";
   const round = [league.name, league.round].filter(Boolean).join(" - ");
 
   return {
     id: fixture.id ? `api-football-${fixture.id}` : slugify(`${kickoffUtc}-${homeTeam}-${awayTeam}`),
     date: getBoliviaDateIso(kickoffDate),
     kickoffUtc,
+    kickoffLocal,
     homeTeam,
     awayTeam,
     group: round || "FIFA World Cup 2026",
@@ -467,66 +461,6 @@ function mapApiFootballEvent(event) {
     awayScore: toScore(goals.away),
     source: "API-Football",
   };
-}
-
-async function fetchSportsDbMatchesForBoliviaDate(dateIso) {
-  const matches = await fetchSportsDbMatches(dateIso);
-  return filterMatchesByBoliviaDate(matches, dateIso);
-}
-
-async function fetchSportsDbMatches(dateIso) {
-  const endpoint = `https://www.thesportsdb.com/api/v1/json/123/eventsday.php?d=${dateIso}&s=Soccer`;
-  const response = await fetch(endpoint, { cache: "no-store" });
-  if (!response.ok) throw new Error("No se pudo consultar la API");
-
-  const data = await response.json();
-  const events = Array.isArray(data.events) ? data.events : [];
-  return events.filter(isWorldCupEvent).map(mapSportsDbEvent);
-}
-
-function isWorldCupEvent(event) {
-  const fields = [
-    event.strLeague,
-    event.strEvent,
-    event.strFilename,
-    event.strSport,
-    event.strCountry,
-    event.strDescriptionEN,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-
-  return fields.includes("world cup") || fields.includes("fifa world cup");
-}
-
-function mapSportsDbEvent(event) {
-  const homeTeam = event.strHomeTeam || "Local";
-  const awayTeam = event.strAwayTeam || "Visitante";
-  const date = event.dateEvent || state.todayIso;
-  const kickoffUtc = event.strTimestamp || buildUtcFromDateTime(date, event.strTime);
-  const kickoffDate = new Date(kickoffUtc);
-  const status = [event.strStatus, event.strProgress, event.strResult].filter(Boolean).join(" ");
-
-  return {
-    id: event.idEvent || slugify(`${date}-${homeTeam}-${awayTeam}`),
-    date: getBoliviaDateIso(kickoffDate),
-    kickoffUtc,
-    homeTeam,
-    awayTeam,
-    group: event.strLeague || "FIFA World Cup 2026",
-    venue: event.strVenue || "Sede por confirmar",
-    status,
-    homeScore: toScore(event.intHomeScore),
-    awayScore: toScore(event.intAwayScore),
-    source: "TheSportsDB",
-  };
-}
-
-function buildUtcFromDateTime(date, time) {
-  if (!time) return `${date}T12:00:00Z`;
-  const cleanTime = time.split("+")[0].replace("Z", "").slice(0, 8);
-  return `${date}T${cleanTime}Z`;
 }
 
 function getApiFootballKickoffIso(fixture) {
@@ -727,7 +661,7 @@ function renderMatchCard(match) {
   return `
     <article class="match-card ${bettable ? "" : "unavailable"}">
       <div class="match-time">
-        <span>${formatBoliviaTime(match.kickoffUtc)}</span>
+        <span>${formatMatchTime(match)}</span>
         <small>Hora BO</small>
       </div>
       <div class="match-main">
@@ -812,7 +746,7 @@ function renderBetForm() {
     ? "<br><small>Apuesta en vivo habilitada por administrador.</small>"
     : "";
   elements.betMatchInfo.innerHTML = `
-    <strong>${formatBoliviaTime(match.kickoffUtc)} hora Bolivia</strong><br>
+    <strong>${formatMatchTime(match)} hora Bolivia</strong><br>
     ${escapeHtml(match.group)} &middot; ${escapeHtml(match.venue)}<br>
     <small>Si termina empatado, el pozo se acumula para el siguiente partido.</small>
     ${liveText}
@@ -1220,7 +1154,7 @@ function renderLiveResultBlock(match) {
     <section class="live-result-block">
       <header>
         <div>
-          <p class="eyebrow">${escapeHtml(match.group)} &middot; ${formatBoliviaTime(match.kickoffUtc)} BO</p>
+          <p class="eyebrow">${escapeHtml(match.group)} &middot; ${formatMatchTime(match)} BO</p>
           <h3>${escapeHtml(match.homeTeam)} vs ${escapeHtml(match.awayTeam)}</h3>
         </div>
         <span class="pill closed">En juego</span>
@@ -1632,6 +1566,18 @@ function formatBoliviaTime(iso) {
     hour12: false,
     timeZone: BOLIVIA_TIME_ZONE,
   }).format(new Date(iso));
+}
+
+function formatMatchTime(match) {
+  const apiLocalTime = getApiFootballBoliviaTime(match.kickoffLocal);
+  return apiLocalTime || formatBoliviaTime(match.kickoffUtc);
+}
+
+function getApiFootballBoliviaTime(value) {
+  const text = String(value || "");
+  if (!/(?:-04:00|-0400)$/.test(text)) return "";
+  const match = text.match(/T(\d{2}):(\d{2})/);
+  return match ? `${match[1]}:${match[2]}` : "";
 }
 
 function formatBoliviaDateTime(iso) {
