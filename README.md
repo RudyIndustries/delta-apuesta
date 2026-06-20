@@ -119,8 +119,10 @@ admin123
 La habilitacion dura solo en la sesion actual del navegador. Al recargar o cerrar la pagina,
 se debe activar otra vez.
 
-La app actualiza los partidos cada minuto. Tambien puedes usar `Actualizar marcador` dentro de la
-ventana de resultados. Si no hay ningun partido en juego, la ventana muestra:
+La app ya no consulta la API cada minuto. La hora de inicio guardada permite saber localmente si el
+partido esta disponible, en juego o finalizado de forma estimada. El boton `Resultados` y
+`Actualizar marcador` si consultan API-Football para traer el marcador real. Si no hay ningun partido
+en juego, la ventana muestra:
 
 ```text
 No se esta disputando un partido por el momento.
@@ -228,10 +230,6 @@ La app puede usar:
 /api/football
 ```
 
-que internamente llama a API-Football, y como respaldo usa:
-
-```text
-https://www.thesportsdb.com/api/v1/json/123/eventsday.php?d=YYYY-MM-DD&s=Soccer
-```
-
-Despues filtra eventos relacionados con `World Cup` o `FIFA World Cup`.
+que internamente llama a API-Football. La cartelera de cada fecha se guarda en Firebase en
+`matchDays/{fecha}`; despues los usuarios leen esa fecha desde Firebase y no vuelven a consumir la API
+para ver horarios o saber si el partido ya empezo.

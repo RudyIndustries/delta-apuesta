@@ -4,6 +4,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   getFirestore,
   onSnapshot,
@@ -100,8 +101,7 @@ async function init() {
   await loadMatches();
   renderAll();
   processFinishedMatches(true);
-  setInterval(async () => {
-    await loadMatches();
+  setInterval(() => {
     renderAll();
     processFinishedMatches(true);
   }, 60 * 1000);
@@ -392,10 +392,23 @@ function canBetOnMatch(match) {
   return state.liveBettingEnabled && lifecycle.live && !getSettlement(match.id);
 }
 
-async function loadMatches() {
+async function loadMatches(options = {}) {
+  const { forceApi = false, reason = "cartelera" } = options;
   try {
+    if (!forceApi) {
+      const cachedMatchDay = await loadCachedMatchDay(state.todayIso);
+      if (cachedMatchDay) {
+        state.matches = sortMatches(cachedMatchDay.matches);
+        state.apiDiagnostics = cachedMatchDay.diagnostics || null;
+        applyManualScoresToMatches();
+        elements.sourceLabel.textContent = `Firebase partidos (${state.matches.length}) + ${getStorageLabel()}`;
+        return;
+      }
+    }
+
     const apiFootballMatches = await fetchApiFootballMatchesForBoliviaDate(state.todayIso);
     state.matches = sortMatches(apiFootballMatches);
+    await persistMatchDay(state.todayIso, state.matches, reason);
     applyManualScoresToMatches();
     elements.sourceLabel.textContent =
       apiFootballMatches.length > 0
@@ -410,6 +423,34 @@ async function loadMatches() {
     applyManualScoresToMatches();
     elements.sourceLabel.textContent = `Error API + ${getStorageLabel()}`;
   }
+}
+
+async function loadCachedMatchDay(dateIso) {
+  if (!state.remoteEnabled || !state.db) return null;
+
+  const snapshot = await getDoc(remoteDoc("matchDays", dateIso));
+  if (!snapshot.exists()) return null;
+
+  const data = snapshot.data();
+  const matches = Array.isArray(data.matches) ? data.matches : [];
+  return {
+    matches,
+    diagnostics: data.diagnostics || null,
+    fetchedAt: data.fetchedAt || "",
+  };
+}
+
+async function persistMatchDay(dateIso, matches, reason) {
+  if (!state.remoteEnabled || !state.db || matches.length === 0) return;
+
+  await setDoc(remoteDoc("matchDays", dateIso), {
+    date: dateIso,
+    matches,
+    diagnostics: state.apiDiagnostics || null,
+    source: "API-Football",
+    reason,
+    fetchedAt: new Date().toISOString(),
+  });
 }
 
 function getStorageLabel() {
@@ -1184,7 +1225,7 @@ function closeResultsModal() {
 async function refreshResultsModal() {
   elements.refreshResultsButton.disabled = true;
   elements.refreshResultsButton.textContent = "Actualizando...";
-  await loadMatches();
+  await loadMatches({ forceApi: true, reason: "resultados" });
   renderAll();
   processFinishedMatches(false);
   renderResultsModal();
