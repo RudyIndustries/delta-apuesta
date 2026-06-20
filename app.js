@@ -415,13 +415,14 @@ async function loadMatches(options = {}) {
         ? `API-Football (${apiFootballMatches.length}) + ${getStorageLabel()}`
         : `Sin partidos API + ${getStorageLabel()}`;
   } catch (error) {
+    console.error(error);
     state.matches = [];
     state.apiDiagnostics = {
       reason: "frontend-error",
-      message: "La app no pudo leer la respuesta de /api/football.",
+      message: "La app no pudo cargar partidos desde Firebase/API.",
     };
     applyManualScoresToMatches();
-    elements.sourceLabel.textContent = `Error API + ${getStorageLabel()}`;
+    elements.sourceLabel.textContent = `Error partidos + ${getStorageLabel()}`;
   }
 }
 
@@ -445,12 +446,28 @@ async function persistMatchDay(dateIso, matches, reason) {
 
   await setDoc(remoteDoc("matchDays", dateIso), {
     date: dateIso,
-    matches,
-    diagnostics: state.apiDiagnostics || null,
+    matches: removeUndefinedValues(matches),
+    diagnostics: removeUndefinedValues(state.apiDiagnostics || null),
     source: "API-Football",
     reason,
     fetchedAt: new Date().toISOString(),
   });
+}
+
+function removeUndefinedValues(value) {
+  if (Array.isArray(value)) {
+    return value.map(removeUndefinedValues);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, itemValue]) => itemValue !== undefined)
+        .map(([key, itemValue]) => [key, removeUndefinedValues(itemValue)]),
+    );
+  }
+
+  return value;
 }
 
 function getStorageLabel() {
