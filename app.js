@@ -33,6 +33,7 @@ const state = {
   settlements: [],
   manualScores: [],
   potResets: [],
+  finalChecks: [],
   modalMatchId: "",
   editingSettlementId: "",
   dismissedSettlementPrompts: new Set(),
@@ -222,6 +223,7 @@ async function initRemoteStore() {
     subscribeToRemoteCollection("settlements", applyRemoteSettlements);
     subscribeToRemoteCollection("manualScores", applyRemoteManualScores);
     subscribeToRemoteCollection("potResets", applyRemotePotResets);
+    subscribeToRemoteCollection("finalChecks", applyRemoteFinalChecks);
   } catch (error) {
     console.warn("Firebase no esta disponible.", error);
     state.remoteEnabled = false;
@@ -296,6 +298,10 @@ function applyRemotePotResets(items) {
   state.potResets = items
     .filter((item) => item.resetAt)
     .sort((a, b) => new Date(a.resetAt || 0) - new Date(b.resetAt || 0));
+}
+
+function applyRemoteFinalChecks(items) {
+  state.finalChecks = items.filter((item) => item.matchId);
 }
 
 async function persistUser(name) {
@@ -1175,6 +1181,17 @@ async function processFinishedMatches(shouldOpenModal = false) {
       continue;
     }
 
+    if (shouldCheckFinalScore(match.id)) {
+      await markFinalCheck(match.id, "intentando-api");
+      const refreshed = await refreshFinishedMatchFromApi(match);
+      if (refreshed) {
+        changed = true;
+        if (!matchToOpen) matchToOpen = refreshed.id;
+        continue;
+      }
+      await markFinalCheck(match.id, "sin-marcador-api");
+    }
+
     if (!matchToOpen && !state.dismissedSettlementPrompts.has(match.id)) matchToOpen = match.id;
   }
 
@@ -1185,6 +1202,46 @@ async function processFinishedMatches(shouldOpenModal = false) {
 
   if (shouldOpenModal && matchToOpen && !elements.resultsModal.open && !elements.historyModal.open) {
     openSettlementModal(matchToOpen);
+  }
+}
+
+function shouldCheckFinalScore(matchId) {
+  const check = state.finalChecks.find((item) => item.matchId === matchId);
+  if (!check) return true;
+  if (check.status === "liquidado-api") return false;
+  const lastCheck = new Date(check.checkedAt || 0);
+  if (Number.isNaN(lastCheck.getTime())) return true;
+  return Date.now() - lastCheck.getTime() >= 10 * 60 * 1000;
+}
+
+async function markFinalCheck(matchId, status) {
+  if (!state.remoteEnabled || !state.db) return;
+
+  const check = {
+    matchId,
+    status,
+    checkedAt: new Date().toISOString(),
+  };
+  await setDoc(remoteDoc("finalChecks", matchId), check);
+  const existingIndex = state.finalChecks.findIndex((item) => item.matchId === matchId);
+  if (existingIndex >= 0) state.finalChecks.splice(existingIndex, 1, check);
+  else state.finalChecks.push(check);
+}
+
+async function refreshFinishedMatchFromApi(match) {
+  try {
+    await loadMatches({ forceApi: true, reason: "finalizado" });
+    const refreshed = state.matches.find((item) => item.id === match.id);
+    if (!refreshed || !hasFinalScore(refreshed) || getSettlement(refreshed.id)) return null;
+
+    const resultChoice = getResultChoice(refreshed);
+    const settlement = createSettlement(refreshed, resultChoice, "automatico-api-final");
+    await persistSettlement(settlement);
+    await markFinalCheck(refreshed.id, "liquidado-api");
+    return refreshed;
+  } catch (error) {
+    console.warn(error);
+    return null;
   }
 }
 

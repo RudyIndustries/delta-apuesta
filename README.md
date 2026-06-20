@@ -32,10 +32,12 @@ Sistema web estatico para registrar apuestas amistosas del Mundial 2026.
 
 ## Liquidacion de apuestas
 
-Cuando un partido termina, la app intenta tomar el marcador desde la API. Si hay marcador final,
-calcula automaticamente quien gano y abre la ventana de liquidacion.
+Cuando un partido termina por hora estimada, la app intenta tomar el marcador desde API-Football de
+forma controlada. Si hay marcador final, calcula automaticamente quien gano y guarda la liquidacion
+en el historial. Ese intento queda registrado en Firebase para no consultar la API sin control.
 
-Si la API no entrega marcador, la ventana permite elegir manualmente el resultado:
+Si la API no entrega marcador, la app puede reintentar despues de unos minutos y la ventana permite
+elegir manualmente el resultado:
 
 - Gano el local.
 - Empate.
@@ -119,10 +121,11 @@ admin123
 La habilitacion dura solo en la sesion actual del navegador. Al recargar o cerrar la pagina,
 se debe activar otra vez.
 
-La app ya no consulta la API cada minuto. La hora de inicio guardada permite saber localmente si el
-partido esta disponible, en juego o finalizado de forma estimada. El boton `Resultados` y
-`Actualizar marcador` si consultan API-Football para traer el marcador real. Si no hay ningun partido
-en juego, la ventana muestra:
+La app ya no consulta la API cada minuto para refrescar la cartelera. La hora de inicio guardada
+permite saber localmente si el partido esta disponible, en juego o finalizado de forma estimada.
+Cuando detecta un partido finalizado con apuestas, consulta API-Football de forma puntual para buscar
+el marcador final. El boton `Resultados` y `Actualizar marcador` tambien consultan API-Football para
+traer el marcador real. Si no hay ningun partido en juego, la ventana muestra:
 
 ```text
 No se esta disputando un partido por el momento.
