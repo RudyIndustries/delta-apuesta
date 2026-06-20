@@ -247,6 +247,11 @@ h3 {
   justify-content: flex-end;
 }
 
+.full-button {
+  width: 100%;
+  margin-bottom: 14px;
+}
+
 .empty-state {
   border: 1px dashed rgba(255, 255, 255, 0.22);
   border-radius: 8px;
@@ -765,6 +770,20 @@ legend {
   font-weight: 900;
 }
 
+.admin-form label,
+.score-edit-grid label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.score-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .settlement-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -855,6 +874,16 @@ legend {
   align-items: start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.history-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.score-edit-button {
+  border-color: rgba(255, 255, 255, 0.24);
 }
 
 .history-block p {

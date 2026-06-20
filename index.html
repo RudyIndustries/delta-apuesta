@@ -66,6 +66,8 @@
             </div>
           </div>
 
+          <button id="clearPoolButton" class="danger-button full-button" type="button">Limpiar pozo</button>
+
           <label class="live-toggle">
             <input id="liveBetToggle" type="checkbox" />
             <span class="toggle-track" aria-hidden="true"></span>
@@ -201,6 +203,68 @@
         <footer class="modal-footer">
           <button id="closeHistoryFooterButton" type="button">Cerrar</button>
         </footer>
+      </div>
+    </dialog>
+
+    <dialog id="liveAdminModal" class="modal">
+      <div class="modal-panel">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow">Advertencia</p>
+            <h2>Apuestas en vivo</h2>
+          </div>
+          <button id="closeLiveAdminButton" class="icon-button" type="button" aria-label="Cerrar">X</button>
+        </header>
+        <form id="liveAdminForm" class="modal-body admin-form">
+          <p>
+            Apostar en vivo solo debe habilitarse si hubo un acuerdo entre todos los participantes.
+          </p>
+          <label>
+            <span>Contraseña de administrador</span>
+            <input id="liveAdminPassword" type="password" autocomplete="off" />
+          </label>
+          <p id="liveAdminMessage" class="form-message" role="status"></p>
+          <footer class="modal-footer">
+            <button type="submit" class="primary-button">Habilitar</button>
+            <button id="cancelLiveAdminButton" type="button">Cancelar</button>
+          </footer>
+        </form>
+      </div>
+    </dialog>
+
+    <dialog id="editScoreModal" class="modal">
+      <div class="modal-panel">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow">Advertencia</p>
+            <h2 id="editScoreTitle">Editar marcador</h2>
+          </div>
+          <button id="closeEditScoreButton" class="icon-button" type="button" aria-label="Cerrar">X</button>
+        </header>
+        <form id="editScoreForm" class="modal-body admin-form">
+          <p>
+            Modifica este marcador solo si hubo un error en el resultado guardado.
+          </p>
+          <label>
+            <span>Contraseña de administrador</span>
+            <input id="editScorePassword" type="password" autocomplete="off" />
+          </label>
+          <div class="score-edit-grid">
+            <label>
+              <span id="editHomeLabel">Local</span>
+              <input id="editHomeScore" type="number" min="0" step="1" inputmode="numeric" />
+            </label>
+            <label>
+              <span id="editAwayLabel">Visitante</span>
+              <input id="editAwayScore" type="number" min="0" step="1" inputmode="numeric" />
+            </label>
+          </div>
+          <p id="editScoreMessage" class="form-message" role="status"></p>
+          <footer class="modal-footer">
+            <button type="submit" class="primary-button">Guardar marcador</button>
+            <button id="cancelEditScoreButton" type="button">Cancelar</button>
+          </footer>
+        </form>
       </div>
     </dialog>
 

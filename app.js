@@ -14,6 +14,8 @@ import {
 
 const BOLIVIA_TIME_ZONE = "America/La_Paz";
 const ADMIN_PASSWORD = "admin123";
+const LIVE_ADMIN_PASSWORDS = new Set([ADMIN_PASSWORD, "admin 123"]);
+const EDIT_SCORE_PASSWORD = "user123";
 const FIREBASE_ROOM_ID = "delta-apuesta-main";
 const DEFAULT_USERS = ["Rene", "Cesar", "Rolando"];
 const QUICK_AMOUNTS = [5, 10, 15, 20, 30, 50, 100];
@@ -30,7 +32,9 @@ const state = {
   bets: [],
   settlements: [],
   manualScores: [],
+  potResets: [],
   modalMatchId: "",
+  editingSettlementId: "",
   dismissedSettlementPrompts: new Set(),
   apiDiagnostics: null,
   liveBettingEnabled: false,
@@ -52,8 +56,15 @@ const elements = {
   ticketUserLabel: document.querySelector("#ticketUserLabel"),
   ticketPoolLabel: document.querySelector("#ticketPoolLabel"),
   ticketBetCountLabel: document.querySelector("#ticketBetCountLabel"),
+  clearPoolButton: document.querySelector("#clearPoolButton"),
   liveBetToggle: document.querySelector("#liveBetToggle"),
   liveBetStatus: document.querySelector("#liveBetStatus"),
+  liveAdminModal: document.querySelector("#liveAdminModal"),
+  liveAdminForm: document.querySelector("#liveAdminForm"),
+  liveAdminPassword: document.querySelector("#liveAdminPassword"),
+  liveAdminMessage: document.querySelector("#liveAdminMessage"),
+  closeLiveAdminButton: document.querySelector("#closeLiveAdminButton"),
+  cancelLiveAdminButton: document.querySelector("#cancelLiveAdminButton"),
   betModal: document.querySelector("#betModal"),
   closeBetButton: document.querySelector("#closeBetButton"),
   selectedMatchTitle: document.querySelector("#selectedMatchTitle"),
@@ -88,6 +99,17 @@ const elements = {
   historyList: document.querySelector("#historyList"),
   closeHistoryButton: document.querySelector("#closeHistoryButton"),
   closeHistoryFooterButton: document.querySelector("#closeHistoryFooterButton"),
+  editScoreModal: document.querySelector("#editScoreModal"),
+  editScoreForm: document.querySelector("#editScoreForm"),
+  editScoreTitle: document.querySelector("#editScoreTitle"),
+  editHomeLabel: document.querySelector("#editHomeLabel"),
+  editAwayLabel: document.querySelector("#editAwayLabel"),
+  editHomeScore: document.querySelector("#editHomeScore"),
+  editAwayScore: document.querySelector("#editAwayScore"),
+  editScorePassword: document.querySelector("#editScorePassword"),
+  editScoreMessage: document.querySelector("#editScoreMessage"),
+  closeEditScoreButton: document.querySelector("#closeEditScoreButton"),
+  cancelEditScoreButton: document.querySelector("#cancelEditScoreButton"),
 };
 
 init();
@@ -139,6 +161,10 @@ function bindEvents() {
 
   elements.closeBetButton.addEventListener("click", closeBetModal);
   elements.liveBetToggle.addEventListener("change", handleLiveBetToggle);
+  elements.clearPoolButton.addEventListener("click", clearCarryoverPool);
+  elements.liveAdminForm.addEventListener("submit", submitLiveAdminForm);
+  elements.closeLiveAdminButton.addEventListener("click", closeLiveAdminModal);
+  elements.cancelLiveAdminButton.addEventListener("click", closeLiveAdminModal);
 
   elements.customAmount.addEventListener("input", () => {
     const value = Number(elements.customAmount.value);
@@ -154,6 +180,9 @@ function bindEvents() {
   elements.closeSettlementButton.addEventListener("click", closeSettlementModal);
   elements.closeHistoryButton.addEventListener("click", closeHistoryModal);
   elements.closeHistoryFooterButton.addEventListener("click", closeHistoryModal);
+  elements.editScoreForm.addEventListener("submit", submitEditScoreForm);
+  elements.closeEditScoreButton.addEventListener("click", closeEditScoreModal);
+  elements.cancelEditScoreButton.addEventListener("click", closeEditScoreModal);
 
   elements.settlementModal.addEventListener("click", (event) => {
     if (event.target === elements.settlementModal) closeSettlementModal();
@@ -161,6 +190,14 @@ function bindEvents() {
 
   elements.historyModal.addEventListener("click", (event) => {
     if (event.target === elements.historyModal) closeHistoryModal();
+  });
+
+  elements.liveAdminModal.addEventListener("click", (event) => {
+    if (event.target === elements.liveAdminModal) closeLiveAdminModal();
+  });
+
+  elements.editScoreModal.addEventListener("click", (event) => {
+    if (event.target === elements.editScoreModal) closeEditScoreModal();
   });
 
   elements.resultsModal.addEventListener("click", (event) => {
@@ -184,6 +221,7 @@ async function initRemoteStore() {
     subscribeToRemoteCollection("bets", applyRemoteBets);
     subscribeToRemoteCollection("settlements", applyRemoteSettlements);
     subscribeToRemoteCollection("manualScores", applyRemoteManualScores);
+    subscribeToRemoteCollection("potResets", applyRemotePotResets);
   } catch (error) {
     console.warn("Firebase no esta disponible.", error);
     state.remoteEnabled = false;
@@ -254,6 +292,12 @@ function applyRemoteManualScores(items) {
   applyManualScoresToMatches();
 }
 
+function applyRemotePotResets(items) {
+  state.potResets = items
+    .filter((item) => item.resetAt)
+    .sort((a, b) => new Date(a.resetAt || 0) - new Date(b.resetAt || 0));
+}
+
 async function persistUser(name) {
   ensureFirebaseReady();
 
@@ -304,7 +348,7 @@ function getBetLogicalKey(bet) {
 async function persistSettlement(settlement) {
   ensureFirebaseReady();
 
-  await setDoc(remoteDoc("settlements", settlement.matchId), settlement);
+  await setDoc(remoteDoc("settlements", settlement.matchId), removeUndefinedValues(settlement));
   const existingIndex = state.settlements.findIndex((item) => item.matchId === settlement.matchId);
   if (existingIndex >= 0) state.settlements.splice(existingIndex, 1, settlement);
   else state.settlements.unshift(settlement);
@@ -366,6 +410,34 @@ async function deleteActiveUser() {
   }
 }
 
+async function clearCarryoverPool() {
+  const carryover = getAvailableCarryover();
+  if (carryover <= 0) {
+    window.alert("No hay pozo acumulado para limpiar.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Se limpiara el pozo acumulado de ${formatCurrency(carryover)}. No se borraran apuestas ni historial. ¿Continuar?`,
+  );
+  if (!confirmed) return;
+
+  try {
+    ensureFirebaseReady();
+    const reset = {
+      id: crypto.randomUUID(),
+      amount: carryover,
+      resetAt: new Date().toISOString(),
+      resetBy: state.activeUser || "admin",
+    };
+    await setDoc(remoteDoc("potResets", reset.id), reset);
+    state.potResets.push(reset);
+    renderAll();
+  } catch (error) {
+    window.alert(error.message || "No se pudo limpiar el pozo.");
+  }
+}
+
 function handleLiveBetToggle() {
   if (!elements.liveBetToggle.checked) {
     state.liveBettingEnabled = false;
@@ -373,16 +445,36 @@ function handleLiveBetToggle() {
     return;
   }
 
-  const password = window.prompt("Ingresa la contraseña de administrador");
-  if (password === ADMIN_PASSWORD) {
-    state.liveBettingEnabled = true;
-    renderAll();
+  elements.liveBetToggle.checked = false;
+  openLiveAdminModal();
+}
+
+function openLiveAdminModal() {
+  elements.liveAdminPassword.value = "";
+  elements.liveAdminMessage.textContent = "";
+  elements.liveAdminMessage.classList.remove("error");
+  if (!elements.liveAdminModal.open) elements.liveAdminModal.showModal();
+  elements.liveAdminPassword.focus();
+}
+
+function closeLiveAdminModal() {
+  if (elements.liveAdminModal.open) elements.liveAdminModal.close();
+  elements.liveBetToggle.checked = state.liveBettingEnabled;
+}
+
+function submitLiveAdminForm(event) {
+  event.preventDefault();
+  const password = elements.liveAdminPassword.value.trim();
+  if (!LIVE_ADMIN_PASSWORDS.has(password)) {
+    elements.liveAdminMessage.textContent = "Contraseña incorrecta. Las apuestas en vivo siguen bloqueadas.";
+    elements.liveAdminMessage.classList.add("error");
+    state.liveBettingEnabled = false;
+    elements.liveBetToggle.checked = false;
     return;
   }
 
-  state.liveBettingEnabled = false;
-  elements.liveBetToggle.checked = false;
-  window.alert("Contraseña incorrecta. Las apuestas en vivo siguen bloqueadas.");
+  state.liveBettingEnabled = true;
+  closeLiveAdminModal();
   renderAll();
 }
 
@@ -619,6 +711,7 @@ function renderShell() {
   elements.ticketUserLabel.textContent = state.activeUser || "Sin usuario";
   elements.ticketPoolLabel.textContent = formatCurrency(getCurrentPot());
   elements.ticketBetCountLabel.textContent = getVisibleBets().length;
+  elements.clearPoolButton.disabled = getAvailableCarryover() <= 0;
   elements.liveBetToggle.checked = state.liveBettingEnabled;
   elements.liveBetStatus.textContent = state.liveBettingEnabled
     ? "Habilitado con admin"
@@ -1428,6 +1521,68 @@ function closeHistoryModal() {
   if (elements.historyModal.open) elements.historyModal.close();
 }
 
+function openEditScoreModal(matchId) {
+  const settlement = getSettlement(matchId);
+  if (!settlement) return;
+
+  state.editingSettlementId = matchId;
+  elements.editScoreTitle.textContent = settlement.matchLabel || "Editar marcador";
+  elements.editHomeLabel.textContent = settlement.homeTeam || getTeamFromMatchLabel(settlement.matchLabel, 0) || "Local";
+  elements.editAwayLabel.textContent =
+    settlement.awayTeam || getTeamFromMatchLabel(settlement.matchLabel, 1) || "Visitante";
+  elements.editHomeScore.value = Number.isFinite(settlement.homeScore) ? settlement.homeScore : 0;
+  elements.editAwayScore.value = Number.isFinite(settlement.awayScore) ? settlement.awayScore : 0;
+  elements.editScorePassword.value = "";
+  elements.editScoreMessage.textContent = "";
+  elements.editScoreMessage.classList.remove("error");
+  if (!elements.editScoreModal.open) elements.editScoreModal.showModal();
+  elements.editScorePassword.focus();
+}
+
+function closeEditScoreModal() {
+  state.editingSettlementId = "";
+  if (elements.editScoreModal.open) elements.editScoreModal.close();
+}
+
+async function submitEditScoreForm(event) {
+  event.preventDefault();
+  const settlement = getSettlement(state.editingSettlementId);
+  if (!settlement) return;
+
+  if (elements.editScorePassword.value.trim() !== EDIT_SCORE_PASSWORD) {
+    elements.editScoreMessage.textContent = "Contraseña incorrecta. No se modifico el marcador.";
+    elements.editScoreMessage.classList.add("error");
+    return;
+  }
+
+  const homeScore = Math.max(0, Math.round(Number(elements.editHomeScore.value)));
+  const awayScore = Math.max(0, Math.round(Number(elements.editAwayScore.value)));
+  if (!Number.isFinite(homeScore) || !Number.isFinite(awayScore)) {
+    elements.editScoreMessage.textContent = "Ingresa un marcador valido.";
+    elements.editScoreMessage.classList.add("error");
+    return;
+  }
+
+  try {
+    const updatedSettlement = createEditedSettlement(settlement, homeScore, awayScore);
+    const rebuiltSettlements = rebuildSettlementChain(updatedSettlement);
+    await Promise.all(
+      rebuiltSettlements.map((item) =>
+        setDoc(remoteDoc("settlements", item.matchId), removeUndefinedValues(item)),
+      ),
+    );
+    state.settlements = rebuiltSettlements.sort((a, b) => new Date(b.settledAt || 0) - new Date(a.settledAt || 0));
+    renderShell();
+    renderMatches();
+    renderHistoryModal();
+    renderBets();
+    closeEditScoreModal();
+  } catch (error) {
+    elements.editScoreMessage.textContent = error.message || "No se pudo editar el marcador.";
+    elements.editScoreMessage.classList.add("error");
+  }
+}
+
 function renderHistoryModal() {
   if (state.settlements.length === 0) {
     elements.historyList.innerHTML =
@@ -1444,7 +1599,11 @@ function renderHistoryModal() {
               <p class="eyebrow">${formatBoliviaDateTime(settlement.settledAt)}</p>
               <h3>${escapeHtml(settlement.matchLabel)}</h3>
             </div>
-            <span class="pill available">${formatCurrency(settlement.totalPool)}</span>
+            <div class="history-actions">
+              <span class="pill available">${formatCurrency(settlement.totalPool)}</span>
+              <button class="icon-button score-edit-button" type="button"
+                data-edit-score="${escapeHtml(settlement.matchId)}" aria-label="Editar marcador">⚙</button>
+            </div>
           </header>
           ${renderFinalScoreCard(settlement)}
           <p>Resultado ganador: <strong>${escapeHtml(settlement.resultLabel)}</strong></p>
@@ -1456,6 +1615,10 @@ function renderHistoryModal() {
       `,
     )
     .join("");
+
+  elements.historyList.querySelectorAll("[data-edit-score]").forEach((button) => {
+    button.addEventListener("click", () => openEditScoreModal(button.dataset.editScore));
+  });
 }
 
 function renderFinalScoreCard(settlement) {
@@ -1523,6 +1686,106 @@ function createSettlement(match, resultChoice, source) {
     source,
     settledAt: new Date().toISOString(),
   };
+}
+
+function createEditedSettlement(settlement, homeScore, awayScore) {
+  const homeTeam = settlement.homeTeam || getTeamFromMatchLabel(settlement.matchLabel, 0) || "Local";
+  const awayTeam = settlement.awayTeam || getTeamFromMatchLabel(settlement.matchLabel, 1) || "Visitante";
+  const resultChoice = getResultChoiceFromScore(homeTeam, awayTeam, homeScore, awayScore);
+  const bets = getBetsForMatch(settlement.matchId);
+  const totalPool = Number(settlement.totalPool || getTotalPool(bets) + Number(settlement.carryoverIn || 0));
+  const winnerPool = bets
+    .filter((bet) => bet.selection === resultChoice)
+    .reduce((sum, bet) => sum + Number(bet.amount || 0), 0);
+  const isDraw = resultChoice === "Empate";
+
+  return {
+    ...settlement,
+    homeTeam,
+    awayTeam,
+    homeScore,
+    awayScore,
+    result: resultChoice,
+    resultLabel: `${getResultText(resultChoice)} (${homeScore}-${awayScore})`,
+    winnerPool,
+    carryoverOut: isDraw ? totalPool : 0,
+    payouts: distributePayouts(bets, resultChoice, totalPool, winnerPool, isDraw),
+    source: "editado",
+    editedAt: new Date().toISOString(),
+    editedBy: state.activeUser || "admin",
+  };
+}
+
+function rebuildSettlementChain(updatedSettlement) {
+  const byMatchId = new Map(state.settlements.map((settlement) => [settlement.matchId, settlement]));
+  byMatchId.set(updatedSettlement.matchId, updatedSettlement);
+  const settlements = [...byMatchId.values()].sort((a, b) => new Date(a.settledAt || 0) - new Date(b.settledAt || 0));
+  const resets = [...state.potResets].sort((a, b) => new Date(a.resetAt || 0) - new Date(b.resetAt || 0));
+  let resetIndex = 0;
+  let carryoverBalance = 0;
+
+  return settlements.map((settlement) => {
+    while (
+      resetIndex < resets.length &&
+      new Date(resets[resetIndex].resetAt || 0) <= new Date(settlement.settledAt || 0)
+    ) {
+      carryoverBalance = 0;
+      resetIndex += 1;
+    }
+
+    const rebuilt = rebuildSettlementWithCarryover(settlement, carryoverBalance);
+    carryoverBalance = Number(rebuilt.carryoverOut || 0);
+    return rebuilt;
+  });
+}
+
+function rebuildSettlementWithCarryover(settlement, carryoverIn) {
+  const bets = getBetsForMatch(settlement.matchId);
+  const resultChoice = getSettlementResultChoice(settlement);
+  const matchPool = Number(settlement.matchPool || getTotalPool(bets));
+  const totalPool = matchPool + carryoverIn;
+  const winnerPool = bets
+    .filter((bet) => bet.selection === resultChoice)
+    .reduce((sum, bet) => sum + Number(bet.amount || 0), 0);
+  const isDraw = resultChoice === "Empate";
+
+  return {
+    ...settlement,
+    result: resultChoice,
+    resultLabel: getSettlementResultLabel(settlement, resultChoice),
+    matchPool,
+    carryoverIn,
+    totalPool,
+    winnerPool,
+    carryoverOut: isDraw ? totalPool : 0,
+    payouts: distributePayouts(bets, resultChoice, totalPool, winnerPool, isDraw),
+  };
+}
+
+function getSettlementResultChoice(settlement) {
+  const homeTeam = settlement.homeTeam || getTeamFromMatchLabel(settlement.matchLabel, 0) || "Local";
+  const awayTeam = settlement.awayTeam || getTeamFromMatchLabel(settlement.matchLabel, 1) || "Visitante";
+  if (hasSettlementScore(settlement)) {
+    return getResultChoiceFromScore(homeTeam, awayTeam, settlement.homeScore, settlement.awayScore);
+  }
+  return settlement.result || "Empate";
+}
+
+function getSettlementResultLabel(settlement, resultChoice) {
+  if (hasSettlementScore(settlement)) {
+    return `${getResultText(resultChoice)} (${settlement.homeScore}-${settlement.awayScore})`;
+  }
+  return getResultText(resultChoice);
+}
+
+function getResultChoiceFromScore(homeTeam, awayTeam, homeScore, awayScore) {
+  if (homeScore > awayScore) return homeTeam;
+  if (awayScore > homeScore) return awayTeam;
+  return "Empate";
+}
+
+function getResultText(resultChoice) {
+  return resultChoice === "Empate" ? "Empate" : `Gano ${resultChoice}`;
 }
 
 function hasSettlementScore(settlement) {
@@ -1620,9 +1883,21 @@ function getVisiblePot() {
 }
 
 function getAvailableCarryover() {
-  return [...state.settlements]
-    .sort((a, b) => new Date(a.settledAt) - new Date(b.settledAt))
-    .reduce((balance, settlement) => Number(settlement.carryoverOut || 0), 0);
+  const settlementEvents = state.settlements.map((settlement) => ({
+    type: "settlement",
+    at: settlement.settledAt,
+    amount: Number(settlement.carryoverOut || 0),
+  }));
+  const resetEvents = state.potResets.map((reset) => ({
+    type: "reset",
+    at: reset.resetAt,
+    amount: 0,
+  }));
+
+  return [...settlementEvents, ...resetEvents]
+    .filter((event) => event.at)
+    .sort((a, b) => new Date(a.at) - new Date(b.at))
+    .reduce((balance, event) => (event.type === "reset" ? 0 : event.amount), 0);
 }
 
 function getTotalPool(bets) {
